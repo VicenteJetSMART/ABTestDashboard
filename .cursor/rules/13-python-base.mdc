@@ -1,0 +1,79 @@
+---
+description: Base Python project rule with PEP8.
+enabled: true
+globs:
+  - "**/*.py"
+---
+
+# 🐍 Python Project Setup Rules (no framework)
+
+These rules define how to structure and configure a clean Python project using the latest stable version of Python. They include best practices for environment setup, dependency management, formatting, linting, and project structure.
+
+## 🧱 Basic structure
+
+The project should include the following files and directories:
+
+```
+project_root/
+│
+├── main.py
+├── requirements.txt
+├── requirements-dev.txt
+├── .gitignore
+├── .editorconfig
+├── .env.example
+├── README.md
+└── /tests
+    └── test_main.py
+```
+
+## 📦 Dependencies
+
+- Runtime dependencies go in `requirements.txt`
+- Development and tooling dependencies go in `requirements-dev.txt`
+
+### Sample `requirements.txt`
+```
+requests
+```
+
+### Sample `requirements-dev.txt`
+```
+black
+flake8
+isort
+mypy
+pytest
+python-dotenv
+```
+
+## 🧪 Tooling & Formatting
+
+- Code must follow **PEP8**
+- Use **Black** for formatting
+- Use **Flake8** for linting
+- Use **isort** for import sorting
+- Use **mypy** for type checking
+
+### Suggested commands
+
+```bash
+black .                # format code
+flake8 .               # lint code
+isort .                # sort imports
+mypy .                 # type checking
+pytest                 # run tests
+```
+
+## 🧪 Testing
+
+- Tests must go under the `tests/` folder.
+- Use `pytest` as test runner.
+- All test files should start with `test_`.
+
+## 🌱 Environment Variables
+
+- Use a `.env.example` file to document required environment variables.
+- Use `python-dotenv` to load `.env` files during local development.
+
+---

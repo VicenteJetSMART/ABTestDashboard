@@ -1,0 +1,4 @@
+"""
+Métricas de asientos.
+"""
+
