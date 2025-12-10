@@ -392,10 +392,13 @@ def run_ui():
                     try:
                         selected_exp_idx = next(opt[1] for opt in experiment_options if opt[0] == selected_exp_display)
                         selected_row = df_exp_filtered.iloc[selected_exp_idx]
+                        # Obtener la fila original con fechas completas para procesamiento
+                        selected_row_original = df_exp.iloc[selected_exp_idx]
                     except StopIteration:
                         # Si no se encuentra el experimento, usar el primero como default
                         selected_exp_idx = experiment_options[0][1]
                         selected_row = df_exp_filtered.iloc[selected_exp_idx]
+                        selected_row_original = df_exp.iloc[selected_exp_idx]
                     
                     # Mostrar detalles del experimento seleccionado
                     with st.expander("📋 Detalles del Experimento Seleccionado"):
@@ -418,6 +421,7 @@ def run_ui():
                     # Configuración rápida para el análisis
                     st.markdown("### ⚙️ Configuración del Análisis")
                     
+                    # Primera fila: Device, Culture, Flow Type
                     col1, col2, col3 = st.columns(3)
                     with col1:
                         device_quick = st.selectbox(
@@ -436,6 +440,33 @@ def run_ui():
                             help="Cultura/país a analizar (ALL = todos los países)"
                         )
                     with col3:
+                        flow_type_quick = st.selectbox(
+                            "🔄 Tipo de Flujo",
+                            options=["ALL", "DB", "PB", "CK"],
+                            index=0,
+                            key="flow_type_quick",
+                            help="Tipo de flujo a analizar (ALL = todos los tipos de flujo)"
+                        )
+                    
+                    # Segunda fila: Bundle Profile, Trip Type, Conversion Window
+                    col4, col5, col6 = st.columns(3)
+                    with col4:
+                        bundle_profile_quick = st.selectbox(
+                            "✈️ Perfil de Vuelo",
+                            options=["ALL", "Vuela Ligero", "Smart", "Full", "Smart + Full"],
+                            index=0,
+                            key="bundle_profile_quick",
+                            help="Perfil de bundle del usuario (ALL = todos los perfiles)"
+                        )
+                    with col5:
+                        trip_type_quick = st.selectbox(
+                            "✈️ Tipo de Viaje",
+                            options=["ALL", "Solo Ida (One Way)", "Ida y Vuelta (Round Trip)"],
+                            index=0,
+                            key="trip_type_quick",
+                            help="Tipo de viaje a analizar (ALL = todos los tipos de viaje)"
+                        )
+                    with col6:
                         conversion_window_options_quick = {
                             "5 minutos": 300,
                             "15 minutos": 900,
@@ -451,6 +482,17 @@ def run_ui():
                             help="Tiempo máximo para considerar una conversión válida"
                         )
                         conversion_window_quick = conversion_window_options_quick[conversion_window_label_quick]
+                    
+                    # Tercera fila: Cantidad de Adultos
+                    col7, col8, col9 = st.columns(3)
+                    with col7:
+                        pax_adult_count_quick = st.selectbox(
+                            "👥 Cantidad de Adultos",
+                            options=["ALL", "1 Adulto", "2 Adultos", "3 Adultos", "4+ Adultos"],
+                            index=0,
+                            key="pax_adult_count_quick",
+                            help="Cantidad de adultos en la búsqueda (ALL = todas las cantidades)"
+                        )
                     
                     # Inicializar mapeo de filtros (se usará más adelante)
                     event_filters_map_quick = {}
@@ -473,7 +515,7 @@ def run_ui():
                         
                         # Mostrar información de métricas disponibles
                         if PREDEFINED_METRICS_QUICK:
-                            with st.expander("📚 Ver Métricas Disponibles", expanded=False):
+                            with st.expander("Ver Métricas Disponibles", expanded=False):
                                 # Generar información automáticamente
                                 metrics_info_quick = get_metrics_info(PREDEFINED_METRICS_QUICK)
                                 
@@ -493,7 +535,7 @@ def run_ui():
                         col_metrics, col_events = st.columns(2)
                         
                         with col_metrics:
-                            st.markdown("#### 🎯 Métricas Predefinidas")
+                            st.markdown("#### Métricas Predefinidas")
                             if PREDEFINED_METRICS_QUICK:
                                 selected_metrics_quick = st.multiselect(
                                     "Métricas:",
@@ -507,7 +549,7 @@ def run_ui():
                                 selected_metrics_quick = []
                         
                         with col_events:
-                            st.markdown("#### 📊 Eventos Individuales")
+                            st.markdown("#### Eventos Individuales")
                             selected_events_raw_quick = st.multiselect(
                                 "Eventos:",
                                 options=AVAILABLE_EVENTS,
@@ -642,13 +684,42 @@ def run_ui():
                     if btn_run_quick and metrics_to_process:
                         with st.spinner("Ejecutando análisis..."):
                             try:
-                                # Obtener fechas del experimento
-                                start_date_quick = selected_row.get('startDate', '2024-01-01')
-                                end_date_quick = selected_row.get('endDate', pd.Timestamp.now().strftime('%Y-%m-%d'))
+                                # Obtener fechas del experimento con precisión horaria desde el DataFrame original
+                                start_date_raw = selected_row_original.get('startDate', None)
+                                end_date_raw = selected_row_original.get('endDate', None)
                                 
-                                # Si endDate es NaN o None, usar la fecha de hoy
-                                if pd.isna(end_date_quick) or end_date_quick in ['None', 'nan', '']:
-                                    end_date_quick = pd.Timestamp.now().strftime('%Y-%m-%d')
+                                # Normalizar start_date: preservar hora completa si está disponible
+                                if start_date_raw is None or pd.isna(start_date_raw) or str(start_date_raw) in ['None', 'nan', '']:
+                                    start_date_quick = '2024-01-01 00:00:00'
+                                else:
+                                    # Intentar parsear la fecha manteniendo la hora si está presente
+                                    try:
+                                        start_dt = pd.to_datetime(start_date_raw)
+                                        # Si tiene hora, mantenerla; si no, usar 00:00:00
+                                        if start_dt.hour == 0 and start_dt.minute == 0 and start_dt.second == 0:
+                                            start_date_quick = start_dt.strftime('%Y-%m-%d %H:%M:%S')
+                                        else:
+                                            start_date_quick = start_dt.strftime('%Y-%m-%d %H:%M:%S')
+                                    except Exception:
+                                        # Fallback: asumir formato YYYY-MM-DD y agregar hora
+                                        start_date_quick = f"{str(start_date_raw).strip()} 00:00:00"
+                                
+                                # Normalizar end_date: preservar hora completa si está disponible
+                                if end_date_raw is None or pd.isna(end_date_raw) or str(end_date_raw) in ['None', 'nan', '']:
+                                    # Si no hay fecha de fin, usar fecha de hoy con hora 23:59:59
+                                    end_date_quick = pd.Timestamp.now().strftime('%Y-%m-%d 23:59:59')
+                                else:
+                                    # Intentar parsear la fecha manteniendo la hora si está presente
+                                    try:
+                                        end_dt = pd.to_datetime(end_date_raw)
+                                        # Si tiene hora, mantenerla; si no, usar 23:59:59 para cubrir el día completo
+                                        if end_dt.hour == 0 and end_dt.minute == 0 and end_dt.second == 0:
+                                            end_date_quick = end_dt.replace(hour=23, minute=59, second=59).strftime('%Y-%m-%d %H:%M:%S')
+                                        else:
+                                            end_date_quick = end_dt.strftime('%Y-%m-%d %H:%M:%S')
+                                    except Exception:
+                                        # Fallback: asumir formato YYYY-MM-DD y agregar hora 23:59:59
+                                        end_date_quick = f"{str(end_date_raw).strip()} 23:59:59"
                                 
                                 experiment_id_quick = selected_row.get('key', '')
                                 
@@ -678,7 +749,11 @@ def run_ui():
                                         'device': device_quick,
                                         'culture': culture_quick,
                                         'event_list': metric_events,
-                                        'conversion_window': conversion_window_quick
+                                        'conversion_window': conversion_window_quick,
+                                        'flow_type': flow_type_quick,
+                                        'bundle_profile': bundle_profile_quick,
+                                        'trip_type': trip_type_quick,
+                                        'pax_adult_count': pax_adult_count_quick
                                     }
                                     
                                     # Agregar event_filters_map solo si existe y no está vacío
@@ -710,10 +785,12 @@ def run_ui():
                                 
                                 # Información sobre variantes detectadas
                                 if experiment_variants:
-                                    st.info(f"🎯 **Variantes detectadas:** {', '.join(experiment_variants)}")
+                                    st.info(f"**Variantes detectadas:** {', '.join(experiment_variants)}")
                                 
-                                # Mostrar resumen por métrica
-                                st.markdown("### 📊 Resumen por Métrica")
+                                # ============================================
+                                # TABLA 1: RESUMEN EJECUTIVO (1 fila por métrica)
+                                # ============================================
+                                st.markdown("### 📊 Resumen Ejecutivo")
                                 summary_data = []
                                 for metric_name, df_metric in metrics_results.items():
                                     if not df_metric.empty:
@@ -726,52 +803,119 @@ def run_ui():
                                         })
                                 
                                 if summary_data:
-                                    summary_df = pd.DataFrame(summary_data)
-                                    st.dataframe(summary_df, use_container_width=True, hide_index=True)
+                                    df_metric_summary = pd.DataFrame(summary_data)
+                                    st.dataframe(df_metric_summary, use_container_width=True, hide_index=True)
                                 
-                                # Mostrar resultados por métrica en tabs
-                                if len(metrics_results) > 1:
-                                    metric_tabs = st.tabs([f"📊 {name}" for name in metrics_results.keys()])
-                                    for tab, (metric_name, df_metric) in zip(metric_tabs, metrics_results.items()):
-                                        with tab:
-                                            if not df_metric.empty:
-                                                st.markdown(f"### {metric_name}")
-                                                st.dataframe(df_metric, use_container_width=True)
-                                                
-                                                # Botón de descarga individual
-                                                excel_buffer = BytesIO()
-                                                df_metric.to_excel(excel_buffer, index=False, engine='openpyxl')
-                                                excel_buffer.seek(0)
-                                                st.download_button(
-                                                    label=f"📥 Descargar {metric_name}",
-                                                    data=excel_buffer.getvalue(),
-                                                    file_name=f"ab_test_{metric_name.replace(' ', '_')}_{experiment_id_quick}_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                                    key=f"download_{metric_name}"
-                                                )
-                                            else:
-                                                st.warning(f"No hay datos disponibles para la métrica '{metric_name}'")
-                                else:
-                                    # Si solo hay una métrica, mostrar directamente
-                                    metric_name = list(metrics_results.keys())[0]
-                                    df_metric = metrics_results[metric_name]
+                                # ============================================
+                                # TABLA 2: DETALLE DE DATOS (Todas las filas)
+                                # ============================================
+                                st.markdown("### 📋 Detalle de Datos")
+                                
+                                # Combinar todos los DataFrames de métricas en uno solo
+                                all_detailed_data = []
+                                
+                                # Preparar fechas formateadas
+                                try:
+                                    if ' ' in start_date_quick or 'T' in start_date_quick:
+                                        start_dt = pd.to_datetime(start_date_quick)
+                                        start_date_formatted = start_dt.strftime('%Y-%m-%d %H:%M:%S')
+                                    else:
+                                        start_dt = pd.to_datetime(start_date_quick)
+                                        start_date_formatted = start_dt.strftime('%Y-%m-%d %H:%M:%S')
                                     
+                                    if ' ' in end_date_quick or 'T' in end_date_quick:
+                                        end_dt = pd.to_datetime(end_date_quick)
+                                        end_date_formatted = end_dt.strftime('%Y-%m-%d %H:%M:%S')
+                                    else:
+                                        end_dt = pd.to_datetime(end_date_quick)
+                                        end_dt = end_dt.replace(hour=23, minute=59, second=59)
+                                        end_date_formatted = end_dt.strftime('%Y-%m-%d %H:%M:%S')
+                                except Exception:
+                                    start_date_formatted = start_date_quick
+                                    end_date_formatted = end_date_quick
+                                
+                                # Procesar cada métrica y agregar columnas de contexto
+                                for metric_name, df_metric in metrics_results.items():
                                     if not df_metric.empty:
-                                        st.dataframe(df_metric, use_container_width=True)
+                                        df_metric_copy = df_metric.copy()
                                         
-                                        # Botón de descarga
-                                        col1, col2, col3 = st.columns([1, 1, 1])
-                                        with col2:
-                                            excel_buffer_quick = BytesIO()
-                                            df_metric.to_excel(excel_buffer_quick, index=False, engine='openpyxl')
-                                            excel_buffer_quick.seek(0)
-                                            st.download_button(
-                                                label="📥 Descargar Excel",
-                                                data=excel_buffer_quick.getvalue(),
-                                                file_name=f"ab_test_results_{experiment_id_quick}_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                                use_container_width=True
-                                            )
+                                        # Agregar columna de métrica
+                                        df_metric_copy['Métrica'] = metric_name
+                                        
+                                        # Agregar columnas de filtro de contexto
+                                        df_metric_copy['Flow Type'] = flow_type_quick
+                                        df_metric_copy['Trip Type'] = trip_type_quick
+                                        df_metric_copy['Flight Profile'] = bundle_profile_quick
+                                        df_metric_copy['Adults'] = pax_adult_count_quick
+                                        
+                                        # Formatear fechas como strings si existen
+                                        if use_cumulative:
+                                            # Para datos acumulados: Start Date y End Date
+                                            if 'Start Date' in df_metric_copy.columns:
+                                                df_metric_copy['Start Date'] = pd.to_datetime(df_metric_copy['Start Date']).dt.strftime('%Y-%m-%d %H:%M:%S')
+                                            else:
+                                                # Si no existe, agregar desde las variables
+                                                df_metric_copy['Start Date'] = start_date_formatted
+                                            
+                                            if 'End Date' in df_metric_copy.columns:
+                                                df_metric_copy['End Date'] = pd.to_datetime(df_metric_copy['End Date']).dt.strftime('%Y-%m-%d %H:%M:%S')
+                                            else:
+                                                df_metric_copy['End Date'] = end_date_formatted
+                                        else:
+                                            # Para datos diarios: Date
+                                            if 'Date' in df_metric_copy.columns:
+                                                df_metric_copy['Date'] = pd.to_datetime(df_metric_copy['Date']).dt.strftime('%Y-%m-%d %H:%M:%S')
+                                            else:
+                                                # Si no existe Date, agregar Start Date y End Date
+                                                df_metric_copy['Start Date'] = start_date_formatted
+                                                df_metric_copy['End Date'] = end_date_formatted
+                                        
+                                        # Asegurar que ExperimentID, Culture y Device estén presentes
+                                        if 'ExperimentID' not in df_metric_copy.columns:
+                                            df_metric_copy['ExperimentID'] = experiment_id_quick
+                                        if 'Culture' not in df_metric_copy.columns:
+                                            df_metric_copy['Culture'] = culture_quick
+                                        if 'Device' not in df_metric_copy.columns:
+                                            df_metric_copy['Device'] = device_quick
+                                        
+                                        all_detailed_data.append(df_metric_copy)
+                                
+                                # Combinar todos los DataFrames
+                                if all_detailed_data:
+                                    df_detailed = pd.concat(all_detailed_data, axis=0, ignore_index=True)
+                                    
+                                    # Reordenar columnas para mejor visualización
+                                    preferred_order = [
+                                        'Métrica', 'Start Date', 'End Date', 'Date',
+                                        'ExperimentID', 'Culture', 'Device',
+                                        'Flow Type', 'Trip Type', 'Flight Profile', 'Adults',
+                                        'Variant', 'Funnel Stage', 'Event Count'
+                                    ]
+                                    
+                                    # Obtener columnas existentes en el orden preferido
+                                    existing_columns = [col for col in preferred_order if col in df_detailed.columns]
+                                    # Agregar cualquier columna adicional que no esté en la lista
+                                    remaining_columns = [col for col in df_detailed.columns if col not in existing_columns]
+                                    final_column_order = existing_columns + remaining_columns
+                                    
+                                    df_detailed = df_detailed[final_column_order]
+                                    st.dataframe(df_detailed, use_container_width=True, hide_index=True)
+                                    
+                                    # Botón de descarga para tabla detallada
+                                    col1, col2, col3 = st.columns([1, 1, 1])
+                                    with col2:
+                                        excel_buffer_detailed = BytesIO()
+                                        df_detailed.to_excel(excel_buffer_detailed, index=False, engine='openpyxl')
+                                        excel_buffer_detailed.seek(0)
+                                        st.download_button(
+                                            label="📥 Descargar Tabla Detallada (Excel)",
+                                            data=excel_buffer_detailed.getvalue(),
+                                            file_name=f"ab_test_detailed_{experiment_id_quick}_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                            use_container_width=True
+                                        )
+                                else:
+                                    st.warning("⚠️ No hay datos detallados disponibles para mostrar")
                                     
                             except Exception as e:
                                 st.error(f"❌ Error ejecutando análisis: {e}")
@@ -848,10 +992,10 @@ def run_ui():
                                 margin: 20px 0; 
                                 text-align: center;">
                         <h3 style="color: white; margin: 0; font-size: 1.3em;">
-                            🧪 {experiment_name_stat} ({experiment_id_stat})
+                            {experiment_name_stat} ({experiment_id_stat})
                         </h3>
                         <p style="color: #E0E0E0; margin: 10px 0 0 0;">
-                            📊 Total de métricas analizadas: <strong>{len(available_metrics)}</strong>
+                            Total de métricas analizadas: <strong>{len(available_metrics)}</strong>
                         </p>
                     </div>
                     """, unsafe_allow_html=True)
@@ -869,23 +1013,6 @@ def run_ui():
                     for metric_key, df_analysis in available_metrics:
                         # El nombre de la métrica ya es el display name
                         metric_display_name = metric_key
-                        
-                        # Crear un recuadro/separador para cada métrica
-                        st.markdown(f"""
-                        <div style="background: linear-gradient(135deg, #1B365D 0%, #3A5478 100%); 
-                                    border: 3px solid #3CCFE7; 
-                                    border-radius: 15px; 
-                                    padding: 25px; 
-                                    margin: 30px 0; 
-                                    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
-                            <h2 style="color: white; margin: 0 0 15px 0; font-size: 1.5em; text-align: center;">
-                                📊 {metric_display_name}
-                            </h2>
-                            <p style="color: #E0E0E0; margin: 0; text-align: center; font-size: 0.9em;">
-                                Total de registros: {len(df_analysis):,}
-                            </p>
-                        </div>
-                        """, unsafe_allow_html=True)
                         
                         # Análisis estadístico para esta métrica
                         if 'Funnel Stage' in df_analysis.columns:
@@ -1088,7 +1215,7 @@ def run_ui():
                                             # Análisis multivariante - usar diseño de tabla
                                             # Test Chi-cuadrado global
                                             chi_square_result = calculate_chi_square_test(variants)
-                                            with st.expander(f"📊 Test Chi-cuadrado Global - {metric_display_name}", expanded=True):
+                                            with st.expander(f"Test Chi-cuadrado Global - {metric_display_name}", expanded=True):
                                                 st.markdown(f"""
                                                 **Test Chi-cuadrado:** {'✓ Significativo' if chi_square_result['significant'] else '✗ No significativo'} 
                                                 (p-value: {chi_square_result['p_value']:.4f}, χ²: {chi_square_result['chi2']:.2f})
@@ -1156,7 +1283,7 @@ def run_ui():
                                 else:
                                     # Multivariante - usar diseño de tabla
                                     chi_square_result = calculate_chi_square_test(variants)
-                                    with st.expander(f"📊 Test Chi-cuadrado Global - {metric_display_name}", expanded=True):
+                                    with st.expander(f"Test Chi-cuadrado Global - {metric_display_name}", expanded=True):
                                         st.markdown(f"""
                                         **Test Chi-cuadrado:** {'✓ Significativo' if chi_square_result['significant'] else '✗ No significativo'} 
                                         (p-value: {chi_square_result['p_value']:.4f}, χ²: {chi_square_result['chi2']:.2f})
@@ -1168,9 +1295,6 @@ def run_ui():
                                     create_multivariant_card(metric_display_name, variants, experiment_name_stat, chi_square_result)
                             else:
                                 st.warning(f"⚠️ Se necesitan al menos 2 variantes para el análisis estadístico de '{metric_display_name}'")
-                        
-                        # Separador entre métricas
-                        st.markdown("<hr style='margin: 40px 0; border: 1px solid #3CCFE7;'>", unsafe_allow_html=True)
 
     with tab_help:
         st.subheader("❓ Guía de Uso")

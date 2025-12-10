@@ -1,4 +1,3 @@
 """
-Métricas de pago.
+Métricas relacionadas con el step de pagos
 """
-

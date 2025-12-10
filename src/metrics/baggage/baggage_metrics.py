@@ -68,3 +68,63 @@ CHECKED_BAG_A2C_DB = {'events': [
     ('ce:(NEW) baggage_dom_loaded_with_vuela_ligero', [get_DB_filter()]),
     ('seatmap_dom_loaded', [checked_bag_filter(), get_DB_filter()])
 ]}
+
+# ===== ADD TO CART (A2C) - Baggage (Nuevas Métricas) =====
+
+# Add to Cart Cabin Bag (El filtro va en el SEGUNDO evento)
+ADD_TO_CART_CABIN_BAG = {'events': [
+    ('baggage_dom_loaded', []),
+    ('seatmap_dom_loaded', [{
+        'subprop_type': 'event',
+        'subprop_key': 'cabin_bag_count',
+        'subprop_op': 'is not',
+        'subprop_value': [0]
+    }])
+]}
+
+# Add to Cart Checked Bag (El filtro va en el SEGUNDO evento)
+ADD_TO_CART_CHECKED_BAG = {'events': [
+    ('baggage_dom_loaded', []),
+    ('seatmap_dom_loaded', [{
+        'subprop_type': 'event',
+        'subprop_key': 'checked_bag_count',
+        'subprop_op': 'is not',
+        'subprop_value': [0]
+    }])
+]}
+
+# Add to Cart Ancillary Modal
+ADD_TO_CART_ANCILLARY_MODAL = {'events': [
+    ('baggage_dom_loaded', []),
+    ('modal_ancillary_clicked', [])
+]}
+
+# ===== CONVERSION RATE (CR) - Baggage =====
+
+# CR Cabin Bag (El filtro va en el PRIMER evento)
+CR_CABIN_BAG = {'events': [
+    ('seatmap_dom_loaded', [{
+        'subprop_type': 'event',
+        'subprop_key': 'cabin_bag_count',
+        'subprop_op': 'is not',
+        'subprop_value': [0]
+    }]),
+    ('revenue_amount', [])
+]}
+
+# CR Checked Bag (El filtro va en el PRIMER evento)
+CR_CHECKED_BAG = {'events': [
+    ('seatmap_dom_loaded', [{
+        'subprop_type': 'event',
+        'subprop_key': 'checked_bag_count',
+        'subprop_op': 'is not',
+        'subprop_value': [0]
+    }]),
+    ('revenue_amount', [])
+]}
+
+# CR Ancillary Modal
+CR_ANCILLARY_MODAL = {'events': [
+    ('modal_ancillary_clicked', []),
+    ('revenue_amount', [])
+]}

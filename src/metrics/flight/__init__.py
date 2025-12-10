@@ -1,4 +1,3 @@
 """
-Métricas de vuelos.
+Métricas relacionadas con el step de vuelos
 """
-

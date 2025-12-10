@@ -92,9 +92,9 @@ try:
     
     # Agregar al diccionario de métricas predefinidas
     PREDEFINED_METRICS_QUICK = {
-        "🎒 NSR [Step] (Next Step Rate)": NSR_[STEP],
-        "💰 WCR [Step] (Website Conversion Rate)": WCR_[STEP],
-        "🆕 Nueva Métrica": [NUEVA_METRICA],
+        "NSR [Step] (Next Step Rate)": NSR_[STEP],
+        "WCR [Step] (Website Conversion Rate)": WCR_[STEP],
+        "Nueva Métrica": [NUEVA_METRICA],
         # ... otras métricas existentes
     }
 ```
@@ -107,7 +107,7 @@ En la sección "📚 Ver Métricas Disponibles", agregar información sobre la n
 metrics_info_quick = [
     # ... métricas existentes
     {
-        "Métrica": "🆕 Nueva Métrica",
+        "Métrica": "Nueva Métrica",
         "Evento Inicial": [NUEVA_METRICA][0] if isinstance([NUEVA_METRICA], list) else [NUEVA_METRICA].get('events', [])[0],
         "Evento Final": [NUEVA_METRICA][1] if isinstance([NUEVA_METRICA], list) else [NUEVA_METRICA].get('events', [])[1] if len([NUEVA_METRICA].get('events', [])) > 1 else "-",
         "Filtros": "DB + filtros_específicos"
@@ -295,9 +295,9 @@ try:
     
     # Agregar al diccionario
     PREDEFINED_METRICS_QUICK.update({
-        "🪑 NSR Seats (Next Step Rate)": NSR_SEATS,
-        "💰 WCR Seats (Website Conversion Rate)": WCR_SEATS,
-        "🎯 Seat Selection A2C": SEAT_SELECTION_A2C
+        "NSR Seats (Next Step Rate)": NSR_SEATS,
+        "WCR Seats (Website Conversion Rate)": WCR_SEATS,
+        "Seat Selection A2C": SEAT_SELECTION_A2C
     })
 ```
 
@@ -321,19 +321,19 @@ def get_filters_count(event_item):
 
 metrics_info_quick.extend([
     {
-        "Métrica": "🪑 NSR Seats",
+        "Métrica": "NSR Seats",
         "Evento Inicial": get_event_name(NSR_SEATS.get('events', [])[0]),
         "Evento Final": get_event_name(NSR_SEATS.get('events', [])[1]) if len(NSR_SEATS.get('events', [])) > 1 else "-",
         "Filtros": "Ninguno"
     },
     {
-        "Métrica": "💰 WCR Seats",
+        "Métrica": "WCR Seats",
         "Evento Inicial": get_event_name(WCR_SEATS.get('events', [])[0]),
         "Evento Final": get_event_name(WCR_SEATS.get('events', [])[1]) if len(WCR_SEATS.get('events', [])) > 1 else "-",
         "Filtros": "Ninguno"
     },
     {
-        "Métrica": "🎯 Seat Selection A2C",
+        "Métrica": "Seat Selection A2C",
         "Evento Inicial": get_event_name(SEAT_SELECTION_A2C.get('events', [])[0]),
         "Evento Final": get_event_name(SEAT_SELECTION_A2C.get('events', [])[1]) if len(SEAT_SELECTION_A2C.get('events', [])) > 1 else "-",
         "Filtros": "cabin_bag (ambos eventos)"

@@ -123,19 +123,8 @@ def load_metrics_from_file(file_path: Path, category: str) -> Dict[str, Dict]:
             
             # Verificar si es una métrica válida
             if is_valid_metric(obj):
-                # Generar nombre de display con emoji según categoría
-                emoji_map = {
-                    'baggage': '🎒',
-                    'seats': '💺',
-                    'payment': '💳',
-                    'passengers': '👥',
-                    'extras': '➕',
-                    'flight': '✈️'
-                }
-                emoji = emoji_map.get(category.lower(), '📊')
-                
-                # Generar nombre de display basado en el nombre de la variable
-                display_name = generate_display_name(name, emoji)
+                # Generar nombre de display sin emoji
+                display_name = generate_display_name(name, '')
                 
                 metrics[display_name] = obj
         
@@ -145,16 +134,16 @@ def load_metrics_from_file(file_path: Path, category: str) -> Dict[str, Dict]:
     return metrics
 
 
-def generate_display_name(var_name: str, emoji: str) -> str:
+def generate_display_name(var_name: str, emoji: str = '') -> str:
     """
     Genera un nombre de display legible a partir del nombre de variable.
     
     Args:
         var_name: Nombre de la variable (ej: 'NSR_BAGGAGE')
-        emoji: Emoji para la categoría
+        emoji: Emoji para la categoría (opcional, por defecto vacío)
         
     Returns:
-        str: Nombre de display (ej: '🎒 NSR Baggage (Next Step Rate)')
+        str: Nombre de display (ej: 'NSR Baggage')
     """
     # Mapeo de prefijos comunes a descripciones
     prefix_map = {
@@ -200,8 +189,10 @@ def generate_display_name(var_name: str, emoji: str) -> str:
         # Fallback: convertir snake_case a Title Case
         base_name = ' '.join(word.capitalize() for word in name_parts)
     
-    # Agregar emoji al inicio
-    return f"{emoji} {base_name}"
+    # Agregar emoji al inicio solo si se proporciona
+    if emoji:
+        return f"{emoji} {base_name}"
+    return base_name
 
 
 def load_all_metrics(metrics_root: Path = None) -> Dict[str, Dict[str, Dict]]:
@@ -215,7 +206,7 @@ def load_all_metrics(metrics_root: Path = None) -> Dict[str, Dict[str, Dict]]:
         Dict: Diccionario organizado por categoría:
         {
             'baggage': {
-                '🎒 NSR Baggage': {'events': [...]},
+                'NSR Baggage': {'events': [...]},
                 ...
             },
             'seats': {...},

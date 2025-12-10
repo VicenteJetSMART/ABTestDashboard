@@ -12,7 +12,8 @@ import json
 import pandas as pd
 import requests
 from requests.auth import HTTPBasicAuth
-from src.utils.amplitude_filters import get_culture_digital_filter, get_device_type
+from datetime import datetime
+from src.utils.amplitude_filters import get_culture_digital_filter, get_device_type, get_flow_type_filter, get_bundle_filters, get_trip_type_filter, get_pax_adult_count_filter
 import sys
 from io import StringIO
 
@@ -52,15 +53,76 @@ def get_credentials():
     
     return api_key, secret_key, management_api_key
 
-def get_funnel_data_experiment(api_key, secret_key, start_date, end_date, experiment_id, device, variant, culture, event_list, conversion_window=1800, event_filters_map=None):
+
+def normalize_date_for_amplitude(date_input, default_time="00:00:00", is_end_date=False):
+    """
+    Normaliza una fecha para enviarla a la API de Amplitude con precisión horaria.
+    
+    Args:
+        date_input: Puede ser:
+            - str en formato ISO (YYYY-MM-DDTHH:mm:ss o YYYY-MM-DD)
+            - datetime object
+            - pd.Timestamp
+            - None
+        default_time: Hora por defecto si solo se proporciona la fecha (formato HH:mm:ss)
+        is_end_date: Si es True y solo hay fecha, usa 23:59:59 en lugar de default_time
+        
+    Returns:
+        str: Fecha formateada como YYYYMMDDHHmmss para la API de Amplitude
+    """
+    if date_input is None or pd.isna(date_input):
+        return None
+    
+    # Convertir a datetime si es string
+    if isinstance(date_input, str):
+        # Intentar parsear diferentes formatos
+        try:
+            # Formato ISO completo con hora
+            if 'T' in date_input or ' ' in date_input:
+                dt = pd.to_datetime(date_input)
+            else:
+                # Solo fecha, agregar hora
+                date_str = date_input.strip()
+                if is_end_date:
+                    time_str = "23:59:59"
+                else:
+                    time_str = default_time
+                dt = pd.to_datetime(f"{date_str} {time_str}")
+        except Exception:
+            # Fallback: asumir formato YYYY-MM-DD
+            date_str = date_input.strip()
+            if is_end_date:
+                time_str = "23:59:59"
+            else:
+                time_str = default_time
+            dt = pd.to_datetime(f"{date_str} {time_str}")
+    elif isinstance(date_input, (pd.Timestamp, datetime)):
+        dt = pd.to_datetime(date_input)
+        # Si no tiene hora (00:00:00), aplicar la hora por defecto según el tipo
+        if dt.hour == 0 and dt.minute == 0 and dt.second == 0:
+            if is_end_date:
+                dt = dt.replace(hour=23, minute=59, second=59)
+            # Si es start_date y es 00:00:00, mantenerlo así (ya es el default)
+    else:
+        # Intentar convertir con pandas
+        dt = pd.to_datetime(date_input)
+        # Si después de la conversión no tiene hora, aplicar la hora por defecto
+        if dt.hour == 0 and dt.minute == 0 and dt.second == 0:
+            if is_end_date:
+                dt = dt.replace(hour=23, minute=59, second=59)
+    
+    # Formatear como YYYYMMDDHHmmss para la API de Amplitude
+    return dt.strftime('%Y%m%d%H%M%S')
+
+def get_funnel_data_experiment(api_key, secret_key, start_date, end_date, experiment_id, device, variant, culture, event_list, conversion_window=1800, event_filters_map=None, flow_type="ALL", bundle_profile="ALL", trip_type="ALL", pax_adult_count="ALL"):
 	"""
 	Obtiene datos de funnel desde la API de Amplitude para un experimento específico.
 	
 	Args:
 		api_key: API key de Amplitude
 		secret_key: Secret key de Amplitude
-		start_date: Fecha de inicio (formato YYYY-MM-DD)
-		end_date: Fecha de fin (formato YYYY-MM-DD)
+		start_date: Fecha de inicio (puede ser str YYYY-MM-DD, YYYY-MM-DD HH:mm:ss, ISO, o datetime)
+		end_date: Fecha de fin (puede ser str YYYY-MM-DD, YYYY-MM-DD HH:mm:ss, ISO, o datetime)
 		experiment_id: ID del experimento en Amplitude
 		device: Tipo de dispositivo ('mobile', 'desktop', 'tablet', o 'All')
 		variant: Nombre de la variante ('control' o 'treatment')
@@ -69,32 +131,89 @@ def get_funnel_data_experiment(api_key, secret_key, start_date, end_date, experi
 		conversion_window: Ventana de tiempo de conversión en segundos (default: 1800 = 30 min)
 		event_filters_map: Diccionario opcional que mapea eventos a sus filtros adicionales.
 		                   Formato: {event_name: [filter1, filter2, ...]}
+		flow_type: Tipo de flujo ('DB', 'PB', 'CK', o 'ALL')
+		bundle_profile: Perfil de bundle ('ALL', 'Vuela Ligero', 'Smart', 'Full', 'Smart + Full')
+		trip_type: Tipo de viaje ('ALL', 'Solo Ida (One Way)', 'Ida y Vuelta (Round Trip)')
+		pax_adult_count: Cantidad de adultos ('ALL', '1 Adulto', '2 Adultos', '3 Adultos', '4+ Adultos')
 		
 	Returns:
 		dict: Respuesta JSON de la API de Amplitude con los datos del funnel
 	"""
 	url = 'https://amplitude.com/api/2/funnels'
 
-	# Construir filtros base (culture y device)
-	base_filters = []
+	# Construir filtros base de segmentación (siempre se aplican a todos los eventos)
+	# Estos son filtros globales que se aplican a todos los eventos del funnel
+	segmentation_filters = []
 
 	if culture != "All":
 		culture_filter = get_culture_digital_filter(culture)
 		if culture_filter:  # Solo agregar si no está vacío
-			base_filters.append(culture_filter)
+			segmentation_filters.append(culture_filter)
 
 	if device != "All":
 		device_filter = get_device_type(device)
 		if device_filter:  # Solo agregar si no está vacío
-			base_filters.append(device_filter)
+			segmentation_filters.append(device_filter)
 
-	# Construir event_filters_grouped con filtros base + filtros adicionales por evento
+	# Construir event_filters_grouped con filtros de segmentación + filtros contextuales por evento
+	# ESTRATEGIA: El filtro flow_type se aplica SOLO al primer evento del funnel.
+	# Al filtrar el primer evento, Amplitude segmenta a los usuarios que cumplen esa condición,
+	# y los eventos siguientes del funnel contarán las acciones de esos usuarios filtrados.
 	event_filters_grouped = []
-	for event in event_list:
-		# Empezar con los filtros base
-		event_filters = base_filters.copy()
+	for idx, event in enumerate(event_list):
+		# Empezar con los filtros de segmentación (siempre se aplican a todos los eventos)
+		event_filters = segmentation_filters.copy()
+		
+		# Verificar si el evento tiene filtros adicionales específicos definidos en la métrica
+		has_explicit_flow_type_filter = False
+		has_explicit_trip_type_filter = False
+		if event_filters_map and event in event_filters_map:
+			additional_filters = event_filters_map[event]
+			if additional_filters:
+				filters_list = additional_filters if isinstance(additional_filters, list) else [additional_filters]
+				# Verificar si alguno de los filtros es un filtro de flow_type o trip_type
+				for filt in filters_list:
+					# Comparar si el filtro es equivalente al filtro de flow_type
+					if isinstance(filt, dict) and filt.get('subprop_key') == 'flow_type':
+						has_explicit_flow_type_filter = True
+					# Comparar si el filtro es equivalente al filtro de trip_type
+					if isinstance(filt, dict) and filt.get('subprop_key') == 'trip_type':
+						has_explicit_trip_type_filter = True
+		
+		# Aplicar filtros contextuales SOLO al primer evento del funnel (idx == 0)
+		# Esto segmenta a los usuarios desde el inicio, y los eventos siguientes
+		# contarán las acciones de esos usuarios filtrados sin necesidad de que
+		# cada evento tenga explícitamente estas propiedades
+		
+		if idx == 0:
+			# Aplicar filtro flow_type si está configurado y no está explícitamente en la métrica
+			if flow_type != "ALL" and not has_explicit_flow_type_filter:
+				flow_type_filter = get_flow_type_filter(flow_type)
+				if flow_type_filter:  # Solo agregar si no está vacío
+					event_filters.append(flow_type_filter)
+			
+			# Aplicar filtros de bundle profile si está configurado
+			# Estos filtros se extienden (no reemplazan) los filtros existentes
+			if bundle_profile != "ALL":
+				bundle_filters = get_bundle_filters(bundle_profile)
+				if bundle_filters:  # Solo agregar si la lista no está vacía
+					event_filters.extend(bundle_filters)
+			
+			# Aplicar filtro trip_type si está configurado y no está explícitamente en la métrica
+			if trip_type != "ALL" and not has_explicit_trip_type_filter:
+				trip_type_filter = get_trip_type_filter(trip_type)
+				if trip_type_filter:  # Solo agregar si no está vacío
+					event_filters.append(trip_type_filter)
+			
+			# Aplicar filtro pax_adult_count si está configurado
+			# Este filtro se aplica al primer evento para segmentar por cantidad de adultos
+			if pax_adult_count != "ALL":
+				pax_adult_count_filter = get_pax_adult_count_filter(pax_adult_count)
+				if pax_adult_count_filter:  # Solo agregar si no está vacío
+					event_filters.append(pax_adult_count_filter)
 		
 		# Agregar filtros adicionales específicos de este evento si existen
+		# Estos filtros pueden incluir filtros de flow_type o bundle explícitos definidos en la métrica
 		if event_filters_map and event in event_filters_map:
 			additional_filters = event_filters_map[event]
 			if additional_filters:
@@ -135,10 +254,14 @@ def get_funnel_data_experiment(api_key, secret_key, start_date, end_date, experi
 						# },
 					],
 
+	# Normalizar fechas con precisión horaria para la API de Amplitude
+	start_date_formatted = normalize_date_for_amplitude(start_date, default_time="00:00:00", is_end_date=False)
+	end_date_formatted = normalize_date_for_amplitude(end_date, default_time="00:00:00", is_end_date=True)
+	
 	params = {
 		'e': [json.dumps(event) for event in event_filters_grouped],
-		'start': start_date.replace('-', ''),
-		'end': end_date.replace('-', ''),
+		'start': start_date_formatted,
+		'end': end_date_formatted,
 		'cs': conversion_window,
 		's': [json.dumps(segment) for segment in segments],
 		
@@ -229,7 +352,7 @@ def get_variant_funnel(variant):
     return df
 
 
-def get_variant_funnel_cum(variant):
+def get_variant_funnel_cum(variant, actual_start_date=None, actual_end_date=None):
     """
     Procesa los datos de una variante y genera un DataFrame con datos acumulados.
     
@@ -240,6 +363,8 @@ def get_variant_funnel_cum(variant):
             - Culture: Cultura filtrada
             - Device: Dispositivo filtrado
             - Variant: Nombre de la variante
+        actual_start_date: Fecha de inicio exacta usada en la query (con hora)
+        actual_end_date: Fecha de fin exacta usada en la query (con hora)
             
     Returns:
         pd.DataFrame: DataFrame con columnas:
@@ -281,11 +406,30 @@ def get_variant_funnel_cum(variant):
         return df
 
     for website_funnel in websites:
-        # Fechas desde dayFunnels
-        day_funnels = website_funnel.get('dayFunnels', {})
-        x_values = day_funnels.get('xValues', [])
-        start_date_filter = pd.to_datetime(x_values[0]) if x_values else None
-        end_date_filter = pd.to_datetime(x_values[-1]) if x_values else None
+        # Usar las fechas exactas de la query en lugar de x_values
+        if actual_start_date is not None:
+            # Convertir a datetime si es string
+            if isinstance(actual_start_date, str):
+                start_date_filter = pd.to_datetime(actual_start_date)
+            else:
+                start_date_filter = pd.to_datetime(actual_start_date)
+        else:
+            # Fallback: usar x_values si no se proporciona actual_start_date
+            day_funnels = website_funnel.get('dayFunnels', {})
+            x_values = day_funnels.get('xValues', [])
+            start_date_filter = pd.to_datetime(x_values[0]) if x_values else None
+        
+        if actual_end_date is not None:
+            # Convertir a datetime si es string
+            if isinstance(actual_end_date, str):
+                end_date_filter = pd.to_datetime(actual_end_date)
+            else:
+                end_date_filter = pd.to_datetime(actual_end_date)
+        else:
+            # Fallback: usar x_values si no se proporciona actual_end_date
+            day_funnels = website_funnel.get('dayFunnels', {})
+            x_values = day_funnels.get('xValues', [])
+            end_date_filter = pd.to_datetime(x_values[-1]) if x_values else None
 
         # Pasos del funnel y acumulados
         funnel_stages = website_funnel.get('events', [])
@@ -325,19 +469,27 @@ def get_control_treatment_raw_data(
     device, 
     culture, 
     event_list,
-    conversion_window=1800
+    conversion_window=1800,
+    flow_type="ALL",
+    bundle_profile="ALL",
+    trip_type="ALL",
+    pax_adult_count="ALL"
 ):
     """
     Obtiene los datos raw de control y treatment para un experimento.
     
     Args:
-        start_date: Fecha de inicio (formato YYYY-MM-DD)
-        end_date: Fecha de fin (formato YYYY-MM-DD)
+        start_date: Fecha de inicio (puede ser str YYYY-MM-DD, YYYY-MM-DD HH:mm:ss, ISO, o datetime)
+        end_date: Fecha de fin (puede ser str YYYY-MM-DD, YYYY-MM-DD HH:mm:ss, ISO, o datetime)
         experiment_id: ID del experimento en Amplitude
         device: Tipo de dispositivo ('mobile', 'desktop', 'tablet', o 'All')
         culture: Código de cultura ('CL', 'AR', 'PE', etc., o 'All')
         event_list: Lista de eventos a analizar
         conversion_window: Ventana de tiempo de conversión en segundos (default: 1800 = 30 min)
+        flow_type: Tipo de flujo ('DB', 'PB', 'CK', o 'ALL')
+        bundle_profile: Perfil de bundle ('ALL', 'Vuela Ligero', 'Smart', 'Full', 'Smart + Full')
+        trip_type: Tipo de viaje ('ALL', 'Solo Ida (One Way)', 'Ida y Vuelta (Round Trip)')
+        pax_adult_count: Cantidad de adultos ('ALL', '1 Adulto', '2 Adultos', '3 Adultos', '4+ Adultos')
         
     Returns:
         tuple: (control_data, treatment_data) donde cada uno es un diccionario con:
@@ -361,7 +513,12 @@ def get_control_treatment_raw_data(
         "control",
         culture,
         event_list,
-        conversion_window
+        conversion_window,
+        None,
+        flow_type,
+        bundle_profile,
+        trip_type,
+        pax_adult_count
     )
     
     
@@ -375,7 +532,12 @@ def get_control_treatment_raw_data(
         "treatment",
         culture,
         event_list,
-        conversion_window
+        conversion_window,
+        None,
+        flow_type,
+        bundle_profile,
+        trip_type,
+        pax_adult_count
     )
     
     
@@ -399,13 +561,13 @@ def get_control_treatment_raw_data(
     return control, treatment
 
 
-def final_pipeline(start_date, end_date, experiment_id, device, culture, event_list, conversion_window=1800, event_filters_map=None):
+def final_pipeline(start_date, end_date, experiment_id, device, culture, event_list, conversion_window=1800, event_filters_map=None, flow_type="ALL", bundle_profile="ALL", trip_type="ALL", pax_adult_count="ALL"):
     """
     Pipeline completo para análisis de experimentos AB Test.
     
     Args:
-        start_date: Fecha de inicio (formato YYYY-MM-DD)
-        end_date: Fecha de fin (formato YYYY-MM-DD)
+        start_date: Fecha de inicio (puede ser str YYYY-MM-DD, YYYY-MM-DD HH:mm:ss, ISO, o datetime)
+        end_date: Fecha de fin (puede ser str YYYY-MM-DD, YYYY-MM-DD HH:mm:ss, ISO, o datetime)
         experiment_id: ID del experimento en Amplitude
         device: Tipo de dispositivo ('mobile', 'desktop', 'tablet', o 'All')
         culture: Código de cultura ('CL', 'AR', 'PE', etc., o 'All')
@@ -413,6 +575,10 @@ def final_pipeline(start_date, end_date, experiment_id, device, culture, event_l
         conversion_window: Ventana de conversión en segundos (default: 1800)
         event_filters_map: Diccionario opcional que mapea eventos a sus filtros adicionales.
                            Formato: {event_name: [filter1, filter2, ...]}
+        flow_type: Tipo de flujo ('DB', 'PB', 'CK', o 'ALL')
+        bundle_profile: Perfil de bundle ('ALL', 'Vuela Ligero', 'Smart', 'Full', 'Smart + Full')
+        trip_type: Tipo de viaje ('ALL', 'Solo Ida (One Way)', 'Ida y Vuelta (Round Trip)')
+        pax_adult_count: Cantidad de adultos ('ALL', '1 Adulto', '2 Adultos', '3 Adultos', '4+ Adultos')
         
     Returns:
         pd.DataFrame: DataFrame combinado con datos de todas las variantes
@@ -426,7 +592,11 @@ def final_pipeline(start_date, end_date, experiment_id, device, culture, event_l
         culture,
         event_list,
         conversion_window,
-        event_filters_map
+        event_filters_map,
+        flow_type,
+        bundle_profile,
+        trip_type,
+        pax_adult_count
     )
 
     # Procesar cada variante
@@ -704,14 +874,18 @@ def get_all_variants_raw_data(
     culture, 
     event_list,
     conversion_window=1800,
-    event_filters_map=None
+    event_filters_map=None,
+    flow_type="ALL",
+    bundle_profile="ALL",
+    trip_type="ALL",
+    pax_adult_count="ALL"
 ):
     """
     Obtiene los datos raw de todas las variantes de un experimento.
     
     Args:
-        start_date: Fecha de inicio (formato YYYY-MM-DD)
-        end_date: Fecha de fin (formato YYYY-MM-DD)
+        start_date: Fecha de inicio (puede ser str YYYY-MM-DD, YYYY-MM-DD HH:mm:ss, ISO, o datetime)
+        end_date: Fecha de fin (puede ser str YYYY-MM-DD, YYYY-MM-DD HH:mm:ss, ISO, o datetime)
         experiment_id: ID del experimento en Amplitude
         device: Tipo de dispositivo ('mobile', 'desktop', 'tablet', o 'All')
         culture: Código de cultura ('CL', 'AR', 'PE', etc., o 'All')
@@ -719,6 +893,10 @@ def get_all_variants_raw_data(
         conversion_window: Ventana de conversión en segundos (default: 1800)
         event_filters_map: Diccionario opcional que mapea eventos a sus filtros adicionales.
                            Formato: {event_name: [filter1, filter2, ...]}
+        flow_type: Tipo de flujo ('DB', 'PB', 'CK', o 'ALL')
+        bundle_profile: Perfil de bundle ('ALL', 'Vuela Ligero', 'Smart', 'Full', 'Smart + Full')
+        trip_type: Tipo de viaje ('ALL', 'Solo Ida (One Way)', 'Ida y Vuelta (Round Trip)')
+        pax_adult_count: Cantidad de adultos ('ALL', '1 Adulto', '2 Adultos', '3 Adultos', '4+ Adultos')
         
     Returns:
         list: Lista de diccionarios con datos de cada variante
@@ -746,7 +924,11 @@ def get_all_variants_raw_data(
             culture,
             event_list,
             conversion_window,
-            event_filters_map
+            event_filters_map,
+            flow_type,
+            bundle_profile,
+            trip_type,
+            pax_adult_count
         )
         
         variant_data = {
@@ -763,13 +945,13 @@ def get_all_variants_raw_data(
     return all_variants_data
 
 
-def final_pipeline_cumulative(start_date, end_date, experiment_id, device, culture, event_list, conversion_window=1800, event_filters_map=None):
+def final_pipeline_cumulative(start_date, end_date, experiment_id, device, culture, event_list, conversion_window=1800, event_filters_map=None, flow_type="ALL", bundle_profile="ALL", trip_type="ALL", pax_adult_count="ALL"):
     """
     Pipeline completo para análisis de experimentos AB Test con datos acumulados.
     
     Args:
-        start_date: Fecha de inicio (formato YYYY-MM-DD)
-        end_date: Fecha de fin (formato YYYY-MM-DD)
+        start_date: Fecha de inicio (puede ser str YYYY-MM-DD, YYYY-MM-DD HH:mm:ss, ISO, o datetime)
+        end_date: Fecha de fin (puede ser str YYYY-MM-DD, YYYY-MM-DD HH:mm:ss, ISO, o datetime)
         experiment_id: ID del experimento en Amplitude
         device: Tipo de dispositivo ('mobile', 'desktop', 'tablet', o 'All')
         culture: Código de cultura ('CL', 'AR', 'PE', etc., o 'All')
@@ -777,6 +959,10 @@ def final_pipeline_cumulative(start_date, end_date, experiment_id, device, cultu
         conversion_window: Ventana de conversión en segundos (default: 1800)
         event_filters_map: Diccionario opcional que mapea eventos a sus filtros adicionales.
                            Formato: {event_name: [filter1, filter2, ...]}
+        flow_type: Tipo de flujo ('DB', 'PB', 'CK', o 'ALL')
+        bundle_profile: Perfil de bundle ('ALL', 'Vuela Ligero', 'Smart', 'Full', 'Smart + Full')
+        trip_type: Tipo de viaje ('ALL', 'Solo Ida (One Way)', 'Ida y Vuelta (Round Trip)')
+        pax_adult_count: Cantidad de adultos ('ALL', '1 Adulto', '2 Adultos', '3 Adultos', '4+ Adultos')
         
     Returns:
         pd.DataFrame: DataFrame combinado con datos acumulados de todas las variantes
@@ -790,13 +976,18 @@ def final_pipeline_cumulative(start_date, end_date, experiment_id, device, cultu
         culture,
         event_list,
         conversion_window,
-        event_filters_map
+        event_filters_map,
+        flow_type,
+        bundle_profile,
+        trip_type,
+        pax_adult_count
     )
 
     # Procesar cada variante con datos acumulados
     all_dataframes = []
     for variant_data in all_variants_data:
-        df_variant = get_variant_funnel_cum(variant_data)
+        # Pasar las fechas exactas a get_variant_funnel_cum
+        df_variant = get_variant_funnel_cum(variant_data, actual_start_date=start_date, actual_end_date=end_date)
         all_dataframes.append(df_variant)
 
     # Combinar todos los DataFrames

@@ -116,6 +116,166 @@ def get_during_booking_filter():
         "subprop_value": ["DB"]
     }
 
+def get_flow_type_filter(flow_type):
+    """
+    Obtiene el filtro de Amplitude para flow_type.
+    
+    Args:
+        flow_type: Tipo de flujo ('DB', 'PB', 'CK', o 'ALL')
+        
+    Returns:
+        dict: Filtro de Amplitude para flow_type, o cadena vacía si flow_type es 'ALL'
+    """
+    switch = {
+        "DB": {
+            "subprop_type": "event",
+            "subprop_key": "flow_type",
+            "subprop_op": "is",
+            "subprop_value": ["DB"]
+        },
+        "PB": {
+            "subprop_type": "event",
+            "subprop_key": "flow_type",
+            "subprop_op": "is",
+            "subprop_value": ["PB"]
+        },
+        "CK": {
+            "subprop_type": "event",
+            "subprop_key": "flow_type",
+            "subprop_op": "is",
+            "subprop_value": ["CK"]
+        },
+    }
+    return switch.get(flow_type, "")
+
+def get_trip_type_filter(trip_type):
+    """
+    Obtiene el filtro de Amplitude para trip_type.
+    
+    Args:
+        trip_type: Tipo de viaje ('Solo Ida (One Way)', 'Ida y Vuelta (Round Trip)', o 'ALL')
+        
+    Returns:
+        dict: Filtro de Amplitude para trip_type, o cadena vacía si trip_type es 'ALL'
+    """
+    switch = {
+        "Solo Ida (One Way)": {
+            "subprop_type": "event",
+            "subprop_key": "trip_type",
+            "subprop_op": "is",
+            "subprop_value": ["O"]
+        },
+        "Ida y Vuelta (Round Trip)": {
+            "subprop_type": "event",
+            "subprop_key": "trip_type",
+            "subprop_op": "is",
+            "subprop_value": ["R"]
+        },
+    }
+    return switch.get(trip_type, "")
+
+def get_pax_adult_count_filter(pax_adult_count):
+    """
+    Obtiene el filtro de Amplitude para pax_adult_count (Cantidad de Adultos).
+    
+    Args:
+        pax_adult_count: Cantidad de adultos ('ALL', '1 Adulto', '2 Adultos', '3 Adultos', '4+ Adultos')
+        
+    Returns:
+        dict: Filtro de Amplitude para pax_adult_count, o cadena vacía si es 'ALL'
+    """
+    if pax_adult_count == "ALL":
+        return ""
+    
+    switch = {
+        "1 Adulto": {
+            "subprop_type": "event",
+            "subprop_key": "pax_adult_count",
+            "subprop_op": "is",
+            "subprop_value": [1]
+        },
+        "2 Adultos": {
+            "subprop_type": "event",
+            "subprop_key": "pax_adult_count",
+            "subprop_op": "is",
+            "subprop_value": [2]
+        },
+        "3 Adultos": {
+            "subprop_type": "event",
+            "subprop_key": "pax_adult_count",
+            "subprop_op": "is",
+            "subprop_value": [3]
+        },
+        "4+ Adultos": {
+            "subprop_type": "event",
+            "subprop_key": "pax_adult_count",
+            "subprop_op": "greater_or_equal",
+            "subprop_value": [4]
+        },
+    }
+    return switch.get(pax_adult_count, "")
+
+def get_bundle_filters(profile_name):
+    """
+    Obtiene los filtros de Amplitude para el perfil de bundle.
+    
+    Args:
+        profile_name: Perfil de vuelo ('ALL', 'Vuela Ligero', 'Smart', 'Full', 'Smart + Full')
+        
+    Returns:
+        list: Lista de filtros de Amplitude para el perfil de bundle, o lista vacía si es 'ALL'
+    """
+    if profile_name == "ALL":
+        return []
+    
+    switch = {
+        "Vuela Ligero": [
+            {
+                "subprop_type": "event",
+                "subprop_key": "bundle_smart_count",
+                "subprop_op": "is",
+                "subprop_value": [0]
+            },
+            {
+                "subprop_type": "event",
+                "subprop_key": "bundle_full_count",
+                "subprop_op": "is",
+                "subprop_value": [0]
+            }
+        ],
+        "Smart": [
+            {
+                "subprop_type": "event",
+                "subprop_key": "bundle_smart_count",
+                "subprop_op": "is not",
+                "subprop_value": [0]
+            }
+        ],
+        "Full": [
+            {
+                "subprop_type": "event",
+                "subprop_key": "bundle_full_count",
+                "subprop_op": "is not",
+                "subprop_value": [0]
+            }
+        ],
+        "Smart + Full": [
+            {
+                "subprop_type": "event",
+                "subprop_key": "bundle_smart_count",
+                "subprop_op": "is not",
+                "subprop_value": [0]
+            },
+            {
+                "subprop_type": "event",
+                "subprop_key": "bundle_full_count",
+                "subprop_op": "is not",
+                "subprop_value": [0]
+            }
+        ],
+    }
+    return switch.get(profile_name, [])
+
 
 def cabin_bag_filter():    
     return {
@@ -131,6 +291,24 @@ def checked_bag_filter():
         "subprop_key": "checked_bag_count",
         "subprop_op": "greater",
         "subprop_value": ['0']
+    }
+
+def seat_selected_filter():
+    """Filtro para usuarios que seleccionaron al menos un asiento"""
+    return {
+        "subprop_type": "event",
+        "subprop_key": "seats",
+        "subprop_op": "greater",
+        "subprop_value": ['0']
+    }
+
+def bundle_selected_filter():
+    """Filtro para usuarios que seleccionaron un bundle"""
+    return {
+        "subprop_type": "event",
+        "subprop_key": "bundle_selected",
+        "subprop_op": "is",
+        "subprop_value": ['true', 'True', '1']
     }
 
 def get_device_type(device):    

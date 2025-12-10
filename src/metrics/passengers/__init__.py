@@ -1,4 +1,3 @@
 """
-Métricas de pasajeros.
+Métricas relacionadas con el step de pasajeros
 """
-
