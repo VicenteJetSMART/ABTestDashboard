@@ -780,6 +780,24 @@ def run_ui():
                                 st.session_state['analysis_experiment_id'] = experiment_id_quick
                                 st.session_state['analysis_experiment_name'] = selected_row.get('name', experiment_id_quick)
                                 
+                                # Guardar parámetros originales para el desglose
+                                st.session_state['analysis_params'] = {
+                                    'start_date': start_date_quick,
+                                    'end_date': end_date_quick,
+                                    'experiment_id': experiment_id_quick,
+                                    'device': device_quick,
+                                    'culture': culture_quick,
+                                    'flow_type': flow_type_quick,
+                                    'bundle_profile': bundle_profile_quick,
+                                    'trip_type': trip_type_quick,
+                                    'pax_adult_count': pax_adult_count_quick,
+                                    'conversion_window': conversion_window_quick,
+                                    'use_cumulative': use_cumulative
+                                }
+                                
+                                # Guardar lista de métricas procesadas
+                                st.session_state['analysis_metrics'] = metrics_to_process
+                                
                                 # Mostrar resumen de resultados
                                 st.success(f"✅ Análisis completado: {len(metrics_results)} métrica(s) procesada(s)")
                                 
@@ -1295,6 +1313,388 @@ def run_ui():
                                     create_multivariant_card(metric_display_name, variants, experiment_name_stat, chi_square_result)
                             else:
                                 st.warning(f"⚠️ Se necesitan al menos 2 variantes para el análisis estadístico de '{metric_display_name}'")
+                    
+                    # ============================================
+                    # LABORATORIO DE SEGMENTACIÓN V2
+                    # ============================================
+                    st.markdown("---")
+                    st.markdown("### 🔬 Laboratorio de Segmentación")
+                    st.caption("Desglosa los resultados por diferentes dimensiones para encontrar insights ocultos")
+                    
+                    # Selector de desglose
+                    breakdown_options = ['Ninguno', 'Device', 'Culture', 'Flow Type', 'Trip Type', 'Flight Profile', 'Adults']
+                    breakdown_selected = st.radio(
+                        "🔍 Desglosar resultados por:",
+                        options=breakdown_options,
+                        horizontal=True,
+                        index=0,
+                        key=f"breakdown_selector_{experiment_id_stat}"
+                    )
+                    
+                    # Si se selecciona un desglose, calcular estadísticas por segmento
+                    if breakdown_selected != 'Ninguno':
+                        # Obtener parámetros originales guardados
+                        if 'analysis_params' not in st.session_state or 'analysis_metrics' not in st.session_state:
+                            st.warning("⚠️ No se encontraron parámetros del análisis original. Por favor, ejecuta un análisis primero.")
+                        else:
+                            original_params = st.session_state['analysis_params']
+                            original_metrics = st.session_state['analysis_metrics']
+                            use_cumulative_breakdown = original_params.get('use_cumulative', True)
+                            
+                            # Definir valores únicos para cada tipo de desglose (deben coincidir con los valores de los selectores)
+                            breakdown_values_map = {
+                                'Device': ['desktop', 'mobile'],  # Valores exactos de los selectores (minúsculas, sin 'ALL')
+                                'Culture': ['CL', 'AR', 'PE', 'CO', 'BR', 'UY', 'PY', 'EC', 'US', 'DO'],  # Valores exactos de los selectores (sin 'ALL')
+                                'Flow Type': ['DB', 'PB', 'CK'],  # Valores exactos de los selectores (sin 'ALL')
+                                'Trip Type': ['Solo Ida (One Way)', 'Ida y Vuelta (Round Trip)'],  # Valores exactos de los selectores (sin 'ALL')
+                                'Flight Profile': ['Vuela Ligero', 'Smart', 'Full', 'Smart + Full'],  # Valores exactos de los selectores (sin 'ALL')
+                                'Adults': ['1 Adulto', '2 Adultos', '3 Adultos', '4+ Adultos']  # Valores exactos de los selectores (sin 'ALL')
+                            }
+                            
+                            # Mapeo de desglose a parámetro de la función
+                            param_mapping = {
+                                'Device': 'device',
+                                'Culture': 'culture',
+                                'Flow Type': 'flow_type',
+                                'Trip Type': 'trip_type',
+                                'Flight Profile': 'bundle_profile',
+                                'Adults': 'pax_adult_count'
+                            }
+                            
+                            breakdown_param = param_mapping.get(breakdown_selected)
+                            
+                            if breakdown_param:
+                                # Obtener valores únicos disponibles dinámicamente desde los datos del experimento
+                                segment_values = []
+                                
+                                if breakdown_selected == 'Culture':
+                                    # Obtener culturas reales presentes en los datos del experimento
+                                    all_cultures = set()
+                                    
+                                    # Método 1: Intentar obtener de los datos procesados (si tienen culturas específicas)
+                                    for metric_key, df_analysis in available_metrics:
+                                        if 'Culture' in df_analysis.columns:
+                                            # Obtener valores únicos y excluir 'ALL' y valores nulos
+                                            cultures_in_data = df_analysis['Culture'].dropna().unique().tolist()
+                                            for culture in cultures_in_data:
+                                                culture_str = str(culture).strip()
+                                                if culture_str and culture_str.upper() != 'ALL' and culture_str.upper() != 'N/A':
+                                                    all_cultures.add(culture_str)
+                                    
+                                    # Método 2: Si no encontramos culturas específicas (porque el análisis fue con 'ALL'),
+                                    # hacer una consulta rápida para obtener las culturas disponibles
+                                    if not all_cultures:
+                                        try:
+                                            # Hacer una consulta rápida con 'ALL' para obtener las culturas reales
+                                            # Usar la primera métrica como referencia
+                                            if original_metrics:
+                                                first_metric = original_metrics[0]
+                                                test_params = {
+                                                    'start_date': original_params['start_date'],
+                                                    'end_date': original_params['end_date'],
+                                                    'experiment_id': original_params['experiment_id'],
+                                                    'device': 'ALL' if original_params.get('device') == 'ALL' else original_params.get('device', 'ALL'),
+                                                    'culture': 'ALL',  # Consultar con ALL para obtener todas las culturas
+                                                    'event_list': first_metric['events'][:1] if first_metric['events'] else ['homepage_dom_loaded'],  # Solo un evento para ser rápido
+                                                    'conversion_window': original_params['conversion_window'],
+                                                    'flow_type': original_params.get('flow_type', 'ALL'),
+                                                    'bundle_profile': original_params.get('bundle_profile', 'ALL'),
+                                                    'trip_type': original_params.get('trip_type', 'ALL'),
+                                                    'pax_adult_count': original_params.get('pax_adult_count', 'ALL')
+                                                }
+                                                
+                                                # Hacer consulta rápida
+                                                if use_cumulative_breakdown:
+                                                    test_df = final_pipeline_cumulative(**test_params)
+                                                else:
+                                                    test_df = final_pipeline(**test_params)
+                                                
+                                                # Extraer culturas de la respuesta
+                                                if not test_df.empty and 'Culture' in test_df.columns:
+                                                    cultures_from_query = test_df['Culture'].dropna().unique().tolist()
+                                                    for culture in cultures_from_query:
+                                                        culture_str = str(culture).strip()
+                                                        if culture_str and culture_str.upper() != 'ALL' and culture_str.upper() != 'N/A':
+                                                            all_cultures.add(culture_str)
+                                        except Exception:
+                                            # Si falla la consulta, continuar con el fallback
+                                            pass
+                                    
+                                    if all_cultures:
+                                        # Ordenar las culturas encontradas
+                                        segment_values = sorted(list(all_cultures))
+                                    else:
+                                        # Fallback: usar la lista del selector (sin 'ALL')
+                                        # Esta lista viene del selector de Culture en la UI
+                                        culture_options_from_ui = ["CL", "AR", "PE", "CO", "BR", "UY", "PY", "EC", "US", "DO"]
+                                        segment_values = culture_options_from_ui
+                                else:
+                                    # Para otros desgloses, usar la lista predefinida
+                                    segment_values = breakdown_values_map.get(breakdown_selected, [])
+                                
+                                if not segment_values:
+                                    st.warning(f"⚠️ No se encontraron valores para desglosar por '{breakdown_selected}'")
+                                else:
+                                    # Procesar cada métrica con desglose
+                                    for metric_info in original_metrics:
+                                        metric_display_name = metric_info['name']
+                                        metric_events = metric_info['events']
+                                        metric_filters = metric_info.get('filters', {})
+                                        
+                                        st.markdown(f"#### 📊 Desglose por {breakdown_selected} - {metric_display_name}")
+                                        
+                                        # Importar create_metric_card si no está disponible
+                                        from src.utils.statistical_analysis import create_metric_card
+                                        
+                                        # Barra de progreso para el desglose
+                                        breakdown_progress = st.progress(0)
+                                        total_segments = len(segment_values)
+                                        
+                                        for idx, segment_value in enumerate(segment_values):
+                                            try:
+                                                breakdown_progress.progress((idx + 1) / total_segments)
+                                                
+                                                # Crear parámetros base desde los originales
+                                                # IMPORTANTE: Copiar los valores originales pero asegurarse de que no sean 'ALL'
+                                                base_params = {
+                                                    'start_date': original_params['start_date'],
+                                                    'end_date': original_params['end_date'],
+                                                    'experiment_id': original_params['experiment_id'],
+                                                    'device': original_params['device'],
+                                                    'culture': original_params['culture'],
+                                                    'flow_type': original_params['flow_type'],
+                                                    'bundle_profile': original_params['bundle_profile'],
+                                                    'trip_type': original_params['trip_type'],
+                                                    'pax_adult_count': original_params['pax_adult_count'],
+                                                    'conversion_window': original_params['conversion_window']
+                                                }
+                                                
+                                                # SOBRESCRIBIR SOLO el parámetro específico del desglose con el valor del segmento
+                                                # Esto asegura que cada segmento tenga su propio filtro específico
+                                                if breakdown_selected == 'Device':
+                                                    base_params['device'] = segment_value
+                                                elif breakdown_selected == 'Culture':
+                                                    base_params['culture'] = segment_value
+                                                elif breakdown_selected == 'Flow Type':
+                                                    base_params['flow_type'] = segment_value
+                                                elif breakdown_selected == 'Trip Type':
+                                                    base_params['trip_type'] = segment_value
+                                                elif breakdown_selected == 'Flight Profile':
+                                                    base_params['bundle_profile'] = segment_value
+                                                elif breakdown_selected == 'Adults':
+                                                    base_params['pax_adult_count'] = segment_value
+                                                
+                                                # Construir pipeline_kwargs para esta métrica y segmento
+                                                pipeline_kwargs = {
+                                                    'start_date': base_params['start_date'],
+                                                    'end_date': base_params['end_date'],
+                                                    'experiment_id': base_params['experiment_id'],
+                                                    'device': base_params['device'],
+                                                    'culture': base_params['culture'],
+                                                    'event_list': metric_events,
+                                                    'conversion_window': base_params['conversion_window'],
+                                                    'flow_type': base_params['flow_type'],
+                                                    'bundle_profile': base_params['bundle_profile'],
+                                                    'trip_type': base_params['trip_type'],
+                                                    'pax_adult_count': base_params['pax_adult_count']
+                                                }
+                                                
+                                                # Agregar event_filters_map si existe
+                                                if metric_filters:
+                                                    pipeline_kwargs['event_filters_map'] = metric_filters
+                                                
+                                                # Hacer llamada API para este segmento
+                                                if use_cumulative_breakdown:
+                                                    df_segment = final_pipeline_cumulative(**pipeline_kwargs)
+                                                else:
+                                                    df_segment = final_pipeline(**pipeline_kwargs)
+                                                
+                                                if df_segment.empty:
+                                                    continue
+                                                
+                                                # Determinar initial_stage y final_stage
+                                                initial_stage = None
+                                                final_stage = None
+                                                
+                                                if 'Funnel Stage' in df_segment.columns:
+                                                    available_stages = df_segment['Funnel Stage'].unique().tolist()
+                                                    
+                                                    # Intentar obtener configuración de la métrica
+                                                    metric_config = None
+                                                    try:
+                                                        from src.utils.metrics_loader import get_all_metrics_flat
+                                                        all_metrics = get_all_metrics_flat()
+                                                        metric_config = all_metrics.get(metric_display_name)
+                                                    except Exception:
+                                                        pass
+                                                    
+                                                    # Determinar stages
+                                                    if metric_config and 'events' in metric_config and len(metric_config['events']) >= 2:
+                                                        event_names = []
+                                                        for event_item in metric_config['events']:
+                                                            if isinstance(event_item, tuple) and len(event_item) > 0:
+                                                                event_names.append(event_item[0])
+                                                            elif isinstance(event_item, str):
+                                                                event_names.append(event_item)
+                                                        
+                                                        # Función auxiliar para encontrar stage
+                                                        def normalize_event_name_simple(name):
+                                                            name = name.replace('[Amplitude]', '').strip()
+                                                            if name.startswith('ce:'):
+                                                                name = name[3:].strip()
+                                                                if name.startswith('('):
+                                                                    end_paren = name.find(')')
+                                                                    if end_paren != -1:
+                                                                        name = name[end_paren + 1:].strip()
+                                                            return name.lower().strip()
+                                                        
+                                                        def find_stage_robust(event_name, stages, exclude_stage=None):
+                                                            normalized_event = normalize_event_name_simple(event_name)
+                                                            for stage in stages:
+                                                                if stage == event_name and stage != exclude_stage:
+                                                                    return stage
+                                                            for stage in stages:
+                                                                if stage != exclude_stage:
+                                                                    normalized_stage = normalize_event_name_simple(stage)
+                                                                    if normalized_event == normalized_stage:
+                                                                        return stage
+                                                            for stage in stages:
+                                                                if stage != exclude_stage:
+                                                                    normalized_stage = normalize_event_name_simple(stage)
+                                                                    if (normalized_event in normalized_stage or normalized_stage in normalized_event):
+                                                                        return stage
+                                                            return None
+                                                        
+                                                        initial_stage = find_stage_robust(event_names[0], available_stages)
+                                                        final_stage = find_stage_robust(event_names[-1], available_stages, exclude_stage=initial_stage) if len(event_names) > 1 else None
+                                                    
+                                                    if not initial_stage or not final_stage:
+                                                        sorted_stages = sorted(available_stages)
+                                                        initial_stage = sorted_stages[0] if sorted_stages else None
+                                                        final_stage = sorted_stages[-1] if len(sorted_stages) > 1 else sorted_stages[0] if sorted_stages else None
+                                                
+                                                # Si no tenemos stages válidos, saltar este segmento
+                                                if not initial_stage or not final_stage or initial_stage == final_stage:
+                                                    continue
+                                                
+                                                # Preparar variantes para este segmento
+                                                variants_segment = prepare_variants_from_dataframe(
+                                                    df_segment,
+                                                    initial_stage=initial_stage,
+                                                    final_stage=final_stage
+                                                )
+                                                
+                                                if len(variants_segment) < 2:
+                                                    continue
+                                                
+                                                # Calcular estadísticas para cada par de variantes y renderizar tarjeta
+                                                if len(variants_segment) == 2:
+                                                    control = variants_segment[0]
+                                                    treatment = variants_segment[1]
+                                                    
+                                                    # Validar que no haya división por cero
+                                                    if control['n'] == 0 or treatment['n'] == 0:
+                                                        continue
+                                                    
+                                                    results = calculate_ab_test(
+                                                        control['n'], control['x'],
+                                                        treatment['n'], treatment['x']
+                                                    )
+                                                    
+                                                    # Preparar datos para la tarjeta
+                                                    comparison_data = {
+                                                        'baseline': {
+                                                            'name': control['name'],
+                                                            'n': control['n'],
+                                                            'x': control['x']
+                                                        },
+                                                        'treatment': {
+                                                            'name': treatment['name'],
+                                                            'n': treatment['n'],
+                                                            'x': treatment['x']
+                                                        }
+                                                    }
+                                                    
+                                                    # Crear título dinámico con el segmento
+                                                    segment_label_map = {
+                                                        'Device': 'Dispositivo',
+                                                        'Culture': 'Cultura',
+                                                        'Flow Type': 'Tipo de Flujo',
+                                                        'Trip Type': 'Tipo de Viaje',
+                                                        'Flight Profile': 'Perfil de Vuelo',
+                                                        'Adults': 'Cantidad de Adultos'
+                                                    }
+                                                    segment_label = segment_label_map.get(breakdown_selected, breakdown_selected)
+                                                    card_title = f"{segment_label}: {segment_value} - {metric_display_name}"
+                                                    
+                                                    # Renderizar tarjeta individual para este segmento
+                                                    create_metric_card(
+                                                        metric_name=metric_display_name,
+                                                        data=comparison_data,
+                                                        results=results,
+                                                        experiment_title=card_title
+                                                    )
+                                                else:
+                                                    # Para múltiples variantes, comparar cada una con el control
+                                                    control = variants_segment[0]
+                                                    
+                                                    if control['n'] == 0:
+                                                        continue
+                                                    
+                                                    for treatment in variants_segment[1:]:
+                                                        if treatment['n'] == 0:
+                                                            continue
+                                                        
+                                                        results = calculate_ab_test(
+                                                            control['n'], control['x'],
+                                                            treatment['n'], treatment['x']
+                                                        )
+                                                        
+                                                        # Preparar datos para la tarjeta
+                                                        comparison_data = {
+                                                            'baseline': {
+                                                                'name': control['name'],
+                                                                'n': control['n'],
+                                                                'x': control['x']
+                                                            },
+                                                            'treatment': {
+                                                                'name': treatment['name'],
+                                                                'n': treatment['n'],
+                                                                'x': treatment['x']
+                                                            }
+                                                        }
+                                                        
+                                                        # Crear título dinámico con el segmento
+                                                        segment_label_map = {
+                                                            'Device': 'Dispositivo',
+                                                            'Culture': 'Cultura',
+                                                            'Flow Type': 'Tipo de Flujo',
+                                                            'Trip Type': 'Tipo de Viaje',
+                                                            'Flight Profile': 'Perfil de Vuelo',
+                                                            'Adults': 'Cantidad de Adultos'
+                                                        }
+                                                        segment_label = segment_label_map.get(breakdown_selected, breakdown_selected)
+                                                        card_title = f"{segment_label}: {segment_value} - {treatment['name']} - {metric_display_name}"
+                                                        
+                                                        # Renderizar tarjeta individual para este segmento y variante
+                                                        create_metric_card(
+                                                            metric_name=metric_display_name,
+                                                            data=comparison_data,
+                                                            results=results,
+                                                            experiment_title=card_title
+                                                        )
+                                            except Exception as e:
+                                                # Manejar errores silenciosamente para no romper el bucle
+                                                continue
+                                        
+                                        breakdown_progress.empty()
+                                        
+                                        # Las tarjetas ya se renderizaron individualmente dentro del bucle
+                                        # Si no se renderizó ninguna tarjeta, mostrar mensaje informativo
+                                        if total_segments == 0:
+                                            st.info(f"ℹ️ No se encontraron segmentos para desglosar por '{breakdown_selected}' en la métrica '{metric_display_name}'.")
+                                    
+                                    # Cerrar el bucle de métricas
 
     with tab_help:
         st.subheader("❓ Guía de Uso")
