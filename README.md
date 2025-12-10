@@ -65,4 +65,3 @@ Consulta la guía completa en `METRICS_GUIDE.md` y el ejemplo `EXAMPLE_SEATS_MET
 
 ### Licencia y soporte
 - Uso interno Jetsmart. Para dudas técnicas, revisa `EXPERIMENT_UTILS_DOCUMENTATION.md`.
-
