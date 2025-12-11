@@ -207,28 +207,41 @@ def get_funnel_data_experiment(api_key, secret_key, start_date, end_date, experi
 		# PASO A: Iniciar lista de filtros para este evento
 		event_filters = []
 		
+		# Extraer el nombre del evento (puede venir como tupla ('evento', [filtros]) o como string)
+		if isinstance(event, tuple) and len(event) > 0:
+			event_name = event[0]
+		elif isinstance(event, str):
+			event_name = event
+		else:
+			event_name = str(event)
+		
 		# PASO B: Agregar SIEMPRE los filtros de segmentación (Device, Culture)
 		# Estos filtros garantizan que el cohorte sea consistente en todo el funnel
 		event_filters.extend(segmentation_filters)
 		
 		# PASO C: Construir filtros contextuales - TODOS los filtros se aplican a TODOS los eventos
-		# payment_confirmation_loaded soporta todas las propiedades (pax_adult_count, flow_type, trip_type, bundle, etc.)
-		# por lo que no necesitamos excepciones ni mapeos especiales
+		# EXCEPCIÓN: payment_confirmation_loaded tiene propiedades rotas/vacías para flow_type y bundle_profile.
+		# - flow_type: Propiedad rota/vacía (siempre da 0 al filtrar)
+		# - bundle_profile: No tiene bundle_smart_count ni bundle_full_count (solo strings de nombres)
+		# El filtrado estricto en el inicio del funnel (Step 1) garantiza la integridad del cohorte.
 		
-		# Flow Type: Agregar SIEMPRE
-		if flow_type and str(flow_type).upper() != "ALL" and not has_explicit_flow_type_filter:
+		# Detectar si el evento actual es payment_confirmation_loaded (propiedades flow_type y bundle_profile rotas)
+		is_payment_confirmation = event_name and 'payment_confirmation_loaded' in str(event_name).lower()
+		
+		# Flow Type: Agregar SIEMPRE EXCEPTO en payment_confirmation_loaded (propiedad rota)
+		if flow_type and str(flow_type).upper() != "ALL" and not has_explicit_flow_type_filter and not is_payment_confirmation:
 			flow_type_filter = get_flow_type_filter(flow_type)
 			if flow_type_filter:
 				event_filters.append(flow_type_filter)
 		
-		# Trip Type: Agregar SIEMPRE
+		# Trip Type: Agregar SIEMPRE (esta propiedad funciona correctamente en payment_confirmation_loaded)
 		if trip_type and str(trip_type).upper() != "ALL" and not has_explicit_trip_type_filter:
 			trip_type_filter = get_trip_type_filter(trip_type)
 			if trip_type_filter:
 				event_filters.append(trip_type_filter)
 		
-		# Bundle Profile: Agregar SIEMPRE (payment_confirmation_loaded soporta bundle_smart_count y bundle_full_count)
-		if bundle_profile and str(bundle_profile).upper() != "ALL" and not has_explicit_bundle_filter:
+		# Bundle Profile: Agregar SIEMPRE EXCEPTO en payment_confirmation_loaded (no tiene bundle_smart_count ni bundle_full_count)
+		if bundle_profile and str(bundle_profile).upper() != "ALL" and not has_explicit_bundle_filter and not is_payment_confirmation:
 			bundle_filters = get_bundle_filters(bundle_profile)
 			if bundle_filters:
 				event_filters.extend(bundle_filters)
@@ -242,8 +255,8 @@ def get_funnel_data_experiment(api_key, secret_key, start_date, end_date, experi
 		# PASO D: Agregar filtros específicos de la métrica si existen para este evento
 		# Estos filtros se agregan DESPUÉS de los globales, permitiendo que la métrica
 		# tenga filtros adicionales específicos sin perder los filtros globales
-		if event_filters_map and event in event_filters_map:
-			additional_filters = event_filters_map[event]
+		if event_filters_map and event_name in event_filters_map:
+			additional_filters = event_filters_map[event_name]
 			if additional_filters:
 				# Si additional_filters es una lista, extender
 				if isinstance(additional_filters, list):
@@ -253,7 +266,7 @@ def get_funnel_data_experiment(api_key, secret_key, start_date, end_date, experi
 					event_filters.append(additional_filters)
 		
 		event_filters_grouped.append({
-			"event_type": event,
+			"event_type": event_name,  # Usar el nombre extraído del evento
 			"filters": event_filters,
 			"group_by": []
 		})
