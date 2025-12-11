@@ -781,16 +781,27 @@ def run_ui():
                                 st.session_state['analysis_experiment_name'] = selected_row.get('name', experiment_id_quick)
                                 
                                 # Guardar parámetros originales para el desglose
+                                # Normalizar valores "ALL" para consistencia (case-insensitive)
+                                def normalize_all_value(value):
+                                    """Normaliza valores 'ALL' a mayúsculas para consistencia.
+                                    Maneja None, strings, y otros tipos de forma segura."""
+                                    if value is None:
+                                        return "ALL"
+                                    value_str = str(value).strip()
+                                    if value_str.upper() == "ALL":
+                                        return "ALL"
+                                    return value  # Retornar valor original (no normalizado a mayúsculas)
+                                
                                 st.session_state['analysis_params'] = {
                                     'start_date': start_date_quick,
                                     'end_date': end_date_quick,
                                     'experiment_id': experiment_id_quick,
-                                    'device': device_quick,
-                                    'culture': culture_quick,
-                                    'flow_type': flow_type_quick,
-                                    'bundle_profile': bundle_profile_quick,
-                                    'trip_type': trip_type_quick,
-                                    'pax_adult_count': pax_adult_count_quick,
+                                    'device': normalize_all_value(device_quick),
+                                    'culture': normalize_all_value(culture_quick),
+                                    'flow_type': normalize_all_value(flow_type_quick),
+                                    'bundle_profile': normalize_all_value(bundle_profile_quick),
+                                    'trip_type': normalize_all_value(trip_type_quick),
+                                    'pax_adult_count': normalize_all_value(pax_adult_count_quick),
                                     'conversion_window': conversion_window_quick,
                                     'use_cumulative': use_cumulative
                                 }
@@ -1059,10 +1070,10 @@ def run_ui():
                                         event_names.append(event_item)
                                 
                                 # Usar el orden de eventos de la métrica
-                                # Para WCR: conversión = revenue_amount / baggage_dom_loaded
+                                # Para WCR: conversión = payment_confirmation_loaded / baggage_dom_loaded
                                 # En prepare_variants_from_dataframe:
                                 #   - initial_stage → n (denominador) = baggage_dom_loaded
-                                #   - final_stage → x (numerador) = revenue_amount
+                                #   - final_stage → x (numerador) = payment_confirmation_loaded
                                 # Conversión = x/n = final_stage / initial_stage
                                 
                                 # Función auxiliar para normalizar nombres de eventos
@@ -1098,11 +1109,10 @@ def run_ui():
                                     # Si tiene guiones bajos, tomar la primera parte (más significativa)
                                     if '_' in name:
                                         parts = name.split('_')
-                                        # Para revenue_amount, tomar 'revenue'
+                                        # Para payment_confirmation_loaded, tomar 'payment'
                                         # Para baggage_dom_loaded, tomar 'baggage'
                                         return parts[0] if len(parts) > 0 else name
                                     # Si no tiene guiones bajos, devolver el nombre completo
-                                    # (para '[Amplitude] Revenue' → 'revenue')
                                     return name
                                 
                                 # Función auxiliar para buscar stage por evento
@@ -1226,8 +1236,14 @@ def run_ui():
                                                 'treatment': treatment
                                             }
                                             
-                                            # Mostrar tarjeta de métrica usando el nombre de la métrica
-                                            create_metric_card(metric_display_name, comparison_data, results, experiment_name_stat)
+                                            # Mostrar tarjeta de métrica: Header = Experimento, Sub-header = Métrica
+                                            create_metric_card(
+                                                metric_name=metric_display_name,
+                                                data=comparison_data,
+                                                results=results,
+                                                experiment_name=experiment_name_stat,
+                                                metric_subtitle=metric_display_name
+                                            )
                                             
                                         else:
                                             # Análisis multivariante - usar diseño de tabla
@@ -1241,8 +1257,14 @@ def run_ui():
                                                 Este test evalúa si existe una diferencia significativa entre **todas** las variantes de forma global.
                                                 """)
                                             
-                                            # Mostrar tarjeta multivariante con diseño de tabla
-                                            create_multivariant_card(metric_display_name, variants, experiment_name_stat, chi_square_result)
+                                            # Mostrar tarjeta multivariante: Header = Experimento, Sub-header = Métrica
+                                            create_multivariant_card(
+                                                metric_name=metric_display_name,
+                                                variants=variants,
+                                                experiment_name=experiment_name_stat,
+                                                metric_subtitle=metric_display_name,
+                                                chi_square_result=chi_square_result
+                                            )
                                     else:
                                         st.warning(f"⚠️ Se necesitan al menos 2 variantes para el análisis estadístico de '{metric_display_name}'. Se encontraron {len(variants)} variantes.")
                             else:
@@ -1297,7 +1319,14 @@ def run_ui():
                                         'treatment': treatment
                                     }
                                     
-                                    create_metric_card(metric_display_name, comparison_data, results, experiment_name_stat)
+                                    # Mostrar tarjeta de métrica: Header = Experimento, Sub-header = Métrica
+                                    create_metric_card(
+                                        metric_name=metric_display_name,
+                                        data=comparison_data,
+                                        results=results,
+                                        experiment_name=experiment_name_stat,
+                                        metric_subtitle=metric_display_name
+                                    )
                                 else:
                                     # Multivariante - usar diseño de tabla
                                     chi_square_result = calculate_chi_square_test(variants)
@@ -1309,8 +1338,14 @@ def run_ui():
                                         Este test evalúa si existe una diferencia significativa entre **todas** las variantes de forma global.
                                         """)
                                     
-                                    # Mostrar tarjeta multivariante con diseño de tabla
-                                    create_multivariant_card(metric_display_name, variants, experiment_name_stat, chi_square_result)
+                                    # Mostrar tarjeta multivariante: Header = Experimento, Sub-header = Métrica
+                                    create_multivariant_card(
+                                        metric_name=metric_display_name,
+                                        variants=variants,
+                                        experiment_name=experiment_name_stat,
+                                        metric_subtitle=metric_display_name,
+                                        chi_square_result=chi_square_result
+                                    )
                             else:
                                 st.warning(f"⚠️ Se necesitan al menos 2 variantes para el análisis estadístico de '{metric_display_name}'")
                     
@@ -1330,6 +1365,16 @@ def run_ui():
                         index=0,
                         key=f"breakdown_selector_{experiment_id_stat}"
                     )
+                    
+                    # Toggle de modo debug (solo visible cuando hay desglose activo)
+                    if breakdown_selected != 'Ninguno':
+                        debug_mode = st.checkbox(
+                            "🕵️ Modo Debug (mostrar payloads de API)",
+                            value=st.session_state.get('debug_mode', False),
+                            key=f"debug_mode_{experiment_id_stat}",
+                            help="Activa la visualización de los payloads enviados a Amplitude para debugging"
+                        )
+                        st.session_state['debug_mode'] = debug_mode
                     
                     # Si se selecciona un desglose, calcular estadísticas por segmento
                     if breakdown_selected != 'Ninguno':
@@ -1454,60 +1499,84 @@ def run_ui():
                                             try:
                                                 breakdown_progress.progress((idx + 1) / total_segments)
                                                 
-                                                # Crear parámetros base desde los originales
-                                                # IMPORTANTE: Copiar los valores originales pero asegurarse de que no sean 'ALL'
-                                                base_params = {
-                                                    'start_date': original_params['start_date'],
-                                                    'end_date': original_params['end_date'],
-                                                    'experiment_id': original_params['experiment_id'],
-                                                    'device': original_params['device'],
-                                                    'culture': original_params['culture'],
-                                                    'flow_type': original_params['flow_type'],
-                                                    'bundle_profile': original_params['bundle_profile'],
-                                                    'trip_type': original_params['trip_type'],
-                                                    'pax_adult_count': original_params['pax_adult_count'],
-                                                    'conversion_window': original_params['conversion_window']
-                                                }
+                                                # ============================================================
+                                                # PASO 1: CAPTURA EXPLÍCITA DEL ESTADO GLOBAL
+                                                # ============================================================
+                                                # Función auxiliar para normalizar y obtener valores seguros
+                                                def get_safe_param(param_name, default_value):
+                                                    """Obtiene un parámetro de original_params con normalización y valor por defecto seguro."""
+                                                    value = original_params.get(param_name, default_value)
+                                                    if value is None:
+                                                        return default_value
+                                                    # Normalizar "ALL" case-insensitive
+                                                    if isinstance(value, str):
+                                                        value_str = value.strip()
+                                                        if value_str.upper() == "ALL":
+                                                            return "ALL"
+                                                    return value
                                                 
-                                                # SOBRESCRIBIR SOLO el parámetro específico del desglose con el valor del segmento
-                                                # Esto asegura que cada segmento tenga su propio filtro específico
-                                                if breakdown_selected == 'Device':
-                                                    base_params['device'] = segment_value
-                                                elif breakdown_selected == 'Culture':
-                                                    base_params['culture'] = segment_value
-                                                elif breakdown_selected == 'Flow Type':
-                                                    base_params['flow_type'] = segment_value
-                                                elif breakdown_selected == 'Trip Type':
-                                                    base_params['trip_type'] = segment_value
-                                                elif breakdown_selected == 'Flight Profile':
-                                                    base_params['bundle_profile'] = segment_value
-                                                elif breakdown_selected == 'Adults':
-                                                    base_params['pax_adult_count'] = segment_value
-                                                
-                                                # Construir pipeline_kwargs para esta métrica y segmento
-                                                pipeline_kwargs = {
-                                                    'start_date': base_params['start_date'],
-                                                    'end_date': base_params['end_date'],
-                                                    'experiment_id': base_params['experiment_id'],
-                                                    'device': base_params['device'],
-                                                    'culture': base_params['culture'],
+                                                # Construir diccionario COMPLETO con TODOS los parámetros globales
+                                                # CRÍTICO: No confiar en valores por defecto de la función
+                                                query_params = {
+                                                    # Parámetros obligatorios (sin defaults en la función)
+                                                    'start_date': original_params.get('start_date'),
+                                                    'end_date': original_params.get('end_date'),
+                                                    'experiment_id': original_params.get('experiment_id'),
                                                     'event_list': metric_events,
-                                                    'conversion_window': base_params['conversion_window'],
-                                                    'flow_type': base_params['flow_type'],
-                                                    'bundle_profile': base_params['bundle_profile'],
-                                                    'trip_type': base_params['trip_type'],
-                                                    'pax_adult_count': base_params['pax_adult_count']
+                                                    
+                                                    # Parámetros de filtros globales (con defaults explícitos)
+                                                    # Estos valores DEBEN venir de original_params, no de defaults de función
+                                                    'device': get_safe_param('device', 'ALL'),
+                                                    'culture': get_safe_param('culture', 'ALL'),
+                                                    'flow_type': get_safe_param('flow_type', 'ALL'),
+                                                    'bundle_profile': get_safe_param('bundle_profile', 'ALL'),
+                                                    'trip_type': get_safe_param('trip_type', 'ALL'),
+                                                    'pax_adult_count': get_safe_param('pax_adult_count', 'ALL'),
+                                                    
+                                                    # Parámetros opcionales con defaults explícitos
+                                                    'conversion_window': original_params.get('conversion_window', 1800),
+                                                    'event_filters_map': metric_filters if metric_filters else None
                                                 }
                                                 
-                                                # Agregar event_filters_map si existe
-                                                if metric_filters:
-                                                    pipeline_kwargs['event_filters_map'] = metric_filters
+                                                # Validar que los parámetros obligatorios no sean None
+                                                required_params = ['start_date', 'end_date', 'experiment_id', 'event_list']
+                                                missing_params = [p for p in required_params if query_params.get(p) is None]
+                                                if missing_params:
+                                                    st.warning(f"⚠️ Parámetros faltantes para segmento '{segment_value}': {missing_params}")
+                                                    continue
                                                 
-                                                # Hacer llamada API para este segmento
+                                                # ============================================================
+                                                # PASO 2: SOBRESCRITURA QUIRÚRGICA DEL PARÁMETRO DEL SEGMENTO
+                                                # ============================================================
+                                                # Solo DESPUÉS de construir el diccionario completo,
+                                                # sobreescribir el parámetro específico del desglose
+                                                if breakdown_selected == 'Device':
+                                                    query_params['device'] = segment_value
+                                                elif breakdown_selected == 'Culture':
+                                                    query_params['culture'] = segment_value
+                                                elif breakdown_selected == 'Flow Type':
+                                                    query_params['flow_type'] = segment_value
+                                                elif breakdown_selected == 'Trip Type':
+                                                    query_params['trip_type'] = segment_value
+                                                elif breakdown_selected == 'Flight Profile':
+                                                    query_params['bundle_profile'] = segment_value
+                                                elif breakdown_selected == 'Adults':
+                                                    query_params['pax_adult_count'] = segment_value
+                                                
+                                                # ============================================================
+                                                # PASO 3: LLAMADA BLINDADA CON TODOS LOS PARÁMETROS EXPLÍCITOS
+                                                # ============================================================
+                                                # Pasar TODOS los parámetros explícitamente, sin depender de defaults
+                                                # Remover event_filters_map si es None (no pasarlo como None)
+                                                call_params = query_params.copy()
+                                                if call_params.get('event_filters_map') is None:
+                                                    call_params.pop('event_filters_map', None)
+                                                
+                                                # Hacer llamada API para este segmento con parámetros explícitos
                                                 if use_cumulative_breakdown:
-                                                    df_segment = final_pipeline_cumulative(**pipeline_kwargs)
+                                                    df_segment = final_pipeline_cumulative(**call_params)
                                                 else:
-                                                    df_segment = final_pipeline(**pipeline_kwargs)
+                                                    df_segment = final_pipeline(**call_params)
                                                 
                                                 if df_segment.empty:
                                                     continue
@@ -1615,24 +1684,18 @@ def run_ui():
                                                         }
                                                     }
                                                     
-                                                    # Crear título dinámico con el segmento
-                                                    segment_label_map = {
-                                                        'Device': 'Dispositivo',
-                                                        'Culture': 'Cultura',
-                                                        'Flow Type': 'Tipo de Flujo',
-                                                        'Trip Type': 'Tipo de Viaje',
-                                                        'Flight Profile': 'Perfil de Vuelo',
-                                                        'Adults': 'Cantidad de Adultos'
-                                                    }
-                                                    segment_label = segment_label_map.get(breakdown_selected, breakdown_selected)
-                                                    card_title = f"{segment_label}: {segment_value} - {metric_display_name}"
+                                                    # Formato requerido: "Métrica - Segmento"
+                                                    # Ejemplo: "WCR Payment - Solo Ida (One Way)"
+                                                    metric_subtitle = f"{metric_display_name} - {segment_value}"
                                                     
                                                     # Renderizar tarjeta individual para este segmento
+                                                    # Header = Experimento, Sub-header = Métrica - Segmento
                                                     create_metric_card(
                                                         metric_name=metric_display_name,
                                                         data=comparison_data,
                                                         results=results,
-                                                        experiment_title=card_title
+                                                        experiment_name=experiment_name_stat,
+                                                        metric_subtitle=metric_subtitle
                                                     )
                                                 else:
                                                     # Para múltiples variantes, comparar cada una con el control
@@ -1664,24 +1727,18 @@ def run_ui():
                                                             }
                                                         }
                                                         
-                                                        # Crear título dinámico con el segmento
-                                                        segment_label_map = {
-                                                            'Device': 'Dispositivo',
-                                                            'Culture': 'Cultura',
-                                                            'Flow Type': 'Tipo de Flujo',
-                                                            'Trip Type': 'Tipo de Viaje',
-                                                            'Flight Profile': 'Perfil de Vuelo',
-                                                            'Adults': 'Cantidad de Adultos'
-                                                        }
-                                                        segment_label = segment_label_map.get(breakdown_selected, breakdown_selected)
-                                                        card_title = f"{segment_label}: {segment_value} - {treatment['name']} - {metric_display_name}"
+                                                        # Formato requerido: "Métrica - Segmento"
+                                                        # Ejemplo: "WCR Payment - Solo Ida (One Way)"
+                                                        metric_subtitle = f"{metric_display_name} - {segment_value}"
                                                         
                                                         # Renderizar tarjeta individual para este segmento y variante
+                                                        # Header = Experimento, Sub-header = Métrica - Segmento
                                                         create_metric_card(
                                                             metric_name=metric_display_name,
                                                             data=comparison_data,
                                                             results=results,
-                                                            experiment_title=card_title
+                                                            experiment_name=experiment_name_stat,
+                                                            metric_subtitle=metric_subtitle
                                                         )
                                             except Exception as e:
                                                 # Manejar errores silenciosamente para no romper el bucle
@@ -1748,7 +1805,7 @@ def run_ui():
         # Website Conversion Rate from [Step] - General (sin filtros adicionales)
         WCR_[STEP] = {'events': [
             ('evento_inicial', []),
-            ('revenue_amount', [])
+            ('payment_confirmation_loaded', [])
         ]}
 
         # [Step] A2C con filtros específicos aplicados a ambos eventos

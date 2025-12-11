@@ -370,7 +370,7 @@ def prepare_variants_by_funnel_stage(df):
     return result
 
 
-def create_metric_card(metric_name, data, results, experiment_title=None):
+def create_metric_card(metric_name, data, results, experiment_name=None, metric_subtitle=None, experiment_title=None):
     """
     Crea una tarjeta estilizada para una métrica A/B (2 variantes).
     Diseño idéntico al multivariante con tabla HTML y header turquesa.
@@ -379,8 +379,14 @@ def create_metric_card(metric_name, data, results, experiment_title=None):
         metric_name: Nombre de la métrica
         data: Diccionario con 'baseline' y 'treatment' (cada uno con 'name', 'n', 'x')
         results: Diccionario con resultados estadísticos
-        experiment_title: Título opcional del experimento
+        experiment_name: Nombre del experimento (se muestra en el badge azul oscuro)
+        metric_subtitle: Subtítulo de la métrica (se muestra en la barra turquesa). 
+                        Si es None, usa el nombre de la métrica.
+        experiment_title: (Deprecated) Usar experiment_name en su lugar. Se mantiene por compatibilidad.
     """
+    # Compatibilidad hacia atrás: si se pasa experiment_title pero no experiment_name, usarlo
+    if experiment_name is None and experiment_title is not None:
+        experiment_name = experiment_title
     baseline = data.get('baseline', {})
     treatment = data.get('treatment', {})
     
@@ -471,17 +477,23 @@ def create_metric_card(metric_name, data, results, experiment_title=None):
     </tr>
     """
     
-    # Determinar qué mostrar en el badge (métrica o KPI por defecto)
-    badge_text = kpi_name if kpi_name else comparison_text
+    # Determinar qué mostrar en el badge (nombre del experimento)
+    # Si no se proporciona experiment_name, usar el nombre de la métrica como fallback
+    badge_text = experiment_name if experiment_name else (kpi_name if kpi_name else comparison_text)
+    
+    # Determinar qué mostrar en el subtítulo (barra turquesa)
+    # Si no se proporciona metric_subtitle, usar el nombre de la métrica
+    subtitle_text = metric_subtitle if metric_subtitle else comparison_text
     
     # HTML completo con la misma estructura que multivariante (en una sola línea)
-    card_html = f"""<div id="result-card-{hash(metric_name)}" style="background: white; border-radius: 16px; margin: 20px auto; box-shadow: 0 8px 32px rgba(0,0,0,0.12); max-width: 1000px; width: 100%; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;"><style>.no-borders-table{{border:none!important;}}.no-borders-table th{{border:none!important;outline:none!important;}}.no-borders-table td{{border:none!important;outline:none!important;}}.no-borders-table tr{{border:none!important;outline:none!important;}}</style><div style="background: #00AEC7; padding: 20px 30px; display: flex; align-items: center; gap: 20px;"><div style="background: #1B365D; color: white; padding: 12px 24px; border-radius: 25px; font-weight: 700; font-size: 16px; text-transform: uppercase;">{badge_text}</div><div style="color: white; font-weight: 600; font-size: 24px; flex: 1;">{experiment_title if experiment_title else comparison_text}</div></div><table class="no-borders-table" style="width: 100%; border-collapse: collapse; border: none;"><thead><tr style="background: #F8FAFB;"><th style="padding: 18px 20px; text-align: left; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">Variante</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">Sesiones</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">Conversiones</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">% Conversión</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">P2BB</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">% Improvement</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">P-value</th></tr></thead><tbody>{table_rows}</tbody></table></div>"""
+    # Estilos optimizados: barra azul oscura ultra-delgada y compacta
+    card_html = f"""<div id="result-card-{hash(metric_name)}" style="background: white; border-radius: 16px; margin: 20px auto; box-shadow: 0 8px 32px rgba(0,0,0,0.12); max-width: 1000px; width: 100%; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;"><style>.no-borders-table{{border:none!important;}}.no-borders-table th{{border:none!important;outline:none!important;}}.no-borders-table td{{border:none!important;outline:none!important;}}.no-borders-table tr{{border:none!important;outline:none!important;}}</style><div style="background: #00AEC7; padding: 12px 24px; display: flex; align-items: center; gap: 16px;"><div style="background: #1B365D; color: white; padding: 6px 15px; border-radius: 16px; font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; margin: 0; line-height: 1.2; display: flex; align-items: center; white-space: nowrap;">{badge_text}</div><div style="color: white; font-weight: 600; font-size: 18px; flex: 1; margin: 0; line-height: 1.2;">{subtitle_text}</div></div><table class="no-borders-table" style="width: 100%; border-collapse: collapse; border: none;"><thead><tr style="background: #F8FAFB;"><th style="padding: 18px 20px; text-align: left; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">Variante</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">Sesiones</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">Conversiones</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">% Conversión</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">P2BB</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">% Improvement</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">P-value</th></tr></thead><tbody>{table_rows}</tbody></table></div>"""
     
     # Usar components.html para mejor renderizado de HTML complejo
     components.html(card_html, height=400, scrolling=False)
 
 
-def create_multivariant_card(metric_name, variants, experiment_title=None, chi_square_result=None):
+def create_multivariant_card(metric_name, variants, experiment_name=None, metric_subtitle=None, chi_square_result=None):
     """
     Crea una tarjeta estilizada para múltiples variantes (A/B/N).
     Diseño adaptado del archivo Gradio con tabla blanca y header turquesa.
@@ -489,7 +501,9 @@ def create_multivariant_card(metric_name, variants, experiment_title=None, chi_s
     Args:
         metric_name: Nombre de la métrica
         variants: Lista de diccionarios con 'name', 'n', 'x'
-        experiment_title: Título opcional del experimento
+        experiment_name: Nombre del experimento (se muestra en el badge azul oscuro)
+        metric_subtitle: Subtítulo de la métrica (se muestra en la barra turquesa).
+                        Si es None, usa el nombre de la métrica.
         chi_square_result: Resultado del test Chi-cuadrado global (dict con 'significant', 'p_value', etc.)
     """
     baseline = variants[0]
@@ -585,12 +599,17 @@ def create_multivariant_card(metric_name, variants, experiment_title=None, chi_s
         </tr>
         """
     
-    # Determinar qué mostrar en el badge (métrica o KPI por defecto)
-    badge_text = kpi_name if kpi_name else comparison_text
+    # Determinar qué mostrar en el badge (nombre del experimento)
+    # Si no se proporciona experiment_name, usar el nombre de la métrica como fallback
+    badge_text = experiment_name if experiment_name else (kpi_name if kpi_name else comparison_text)
+    
+    # Determinar qué mostrar en el subtítulo (barra turquesa)
+    # Si no se proporciona metric_subtitle, usar el nombre de la métrica
+    subtitle_text = metric_subtitle if metric_subtitle else comparison_text
     
     # HTML completo de la tarjeta con el diseño exacto de la imagen (en una sola línea para evitar problemas de renderizado)
-    # Mostrar el nombre de la métrica en el label del badge
-    card_html = f"""<div id="result-card-{hash(metric_name)}" style="background: white; border-radius: 16px; margin: 20px auto; box-shadow: 0 8px 32px rgba(0,0,0,0.12); max-width: 1000px; width: 100%; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;"><style>.no-borders-table{{border:none!important;}}.no-borders-table th{{border:none!important;outline:none!important;}}.no-borders-table td{{border:none!important;outline:none!important;}}.no-borders-table tr{{border:none!important;outline:none!important;}}</style><div style="background: #00AEC7; padding: 20px 30px; display: flex; align-items: center; gap: 20px;"><div style="background: #1B365D; color: white; padding: 12px 24px; border-radius: 25px; font-weight: 700; font-size: 16px; text-transform: uppercase;">{badge_text}</div><div style="color: white; font-weight: 600; font-size: 24px; flex: 1;">{experiment_title if experiment_title else comparison_text}</div></div><table class="no-borders-table" style="width: 100%; border-collapse: collapse; border: none;"><thead><tr style="background: #F8FAFB;"><th style="padding: 18px 20px; text-align: left; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">Variante</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">Sesiones</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">Conversiones</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">% Conversión</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">P2BB</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">% Improvement</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">P-value</th></tr></thead><tbody>{table_rows}</tbody></table></div>"""
+    # Estilos optimizados: barra azul oscura ultra-delgada y compacta
+    card_html = f"""<div id="result-card-{hash(metric_name)}" style="background: white; border-radius: 16px; margin: 20px auto; box-shadow: 0 8px 32px rgba(0,0,0,0.12); max-width: 1000px; width: 100%; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;"><style>.no-borders-table{{border:none!important;}}.no-borders-table th{{border:none!important;outline:none!important;}}.no-borders-table td{{border:none!important;outline:none!important;}}.no-borders-table tr{{border:none!important;outline:none!important;}}</style><div style="background: #00AEC7; padding: 12px 24px; display: flex; align-items: center; gap: 16px;"><div style="background: #1B365D; color: white; padding: 6px 15px; border-radius: 16px; font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; margin: 0; line-height: 1.2; display: flex; align-items: center; white-space: nowrap;">{badge_text}</div><div style="color: white; font-weight: 600; font-size: 18px; flex: 1; margin: 0; line-height: 1.2;">{subtitle_text}</div></div><table class="no-borders-table" style="width: 100%; border-collapse: collapse; border: none;"><thead><tr style="background: #F8FAFB;"><th style="padding: 18px 20px; text-align: left; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">Variante</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">Sesiones</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">Conversiones</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">% Conversión</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">P2BB</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">% Improvement</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">P-value</th></tr></thead><tbody>{table_rows}</tbody></table></div>"""
     
     # Resumen de significancia basado en el test Chi-cuadrado global
     # Solo mostrar mensaje cuando hay test global (chi_square_result)

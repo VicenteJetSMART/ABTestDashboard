@@ -36,7 +36,7 @@ NSR_SEATS_WITH_BUNDLE = {'events': [
 # WCR Seats - General (Website Conversion Rate desde seatmap hasta revenue)
 WCR_SEATS = {'events': [
     ('seatmap_dom_loaded', []),
-    ('revenue_amount', [])
+    ('payment_confirmation_loaded', [])
 ]}
 
 # ===== CONVERSION RATE (CR) =====
@@ -44,25 +44,40 @@ WCR_SEATS = {'events': [
 # Seats CR - General (Conversion Rate desde seatmap hasta revenue)
 SEATS_CR = {'events': [
     ('seatmap_dom_loaded', []),
-    ('revenue_amount', [])
+    ('payment_confirmation_loaded', [])
 ]}
 
-# Seats CR - DB
+# Seats CR - DB (El filtro va en el EVENTO FINAL usando propiedades nativas de payment_confirmation_loaded)
 SEATS_CR_DB = {'events': [
     ('seatmap_dom_loaded', [get_DB_filter()]),
-    ('revenue_amount', [get_DB_filter()])
+    ('payment_confirmation_loaded', [{
+        'subprop_type': 'event',
+        'subprop_key': 'seats',
+        'subprop_op': 'greater',
+        'subprop_value': [0]
+    }])
 ]}
 
-# Seats CR - Con Asientos Seleccionados
+# Seats CR - Con Asientos Seleccionados (El filtro va en el EVENTO FINAL usando propiedades nativas de payment_confirmation_loaded)
 SEATS_CR_WITH_SELECTION = {'events': [
     ('seatmap_dom_loaded', []),
-    ('revenue_amount', [seat_selected_filter()])
+    ('payment_confirmation_loaded', [{
+        'subprop_type': 'event',
+        'subprop_key': 'seats',
+        'subprop_op': 'greater',
+        'subprop_value': [0]
+    }])
 ]}
 
-# Seats CR - Con Bundle
+# Seats CR - Con Bundle (El filtro va en el EVENTO FINAL usando propiedades nativas de payment_confirmation_loaded)
 SEATS_CR_WITH_BUNDLE = {'events': [
     ('seatmap_dom_loaded', []),
-    ('revenue_amount', [bundle_selected_filter()])
+    ('payment_confirmation_loaded', [{
+        'subprop_type': 'event',
+        'subprop_key': 'seats',
+        'subprop_op': 'greater',
+        'subprop_value': [0]
+    }])
 ]}
 
 # ===== ADD TO CART (A2C) =====
@@ -115,15 +130,25 @@ ADD_TO_CART_INBOUND_SEAT = {'events': [
 
 # ===== CONVERSION RATE (CR) - Seats (Nuevas Métricas) =====
 
-# CR Outbound Seat
+# CR Outbound Seat (El filtro va en el EVENTO FINAL usando propiedades nativas de payment_confirmation_loaded)
 CR_OUTBOUND_SEAT = {'events': [
     ('outbound_seat_selected', []),
-    ('revenue_amount', [])
+    ('payment_confirmation_loaded', [{
+        'subprop_type': 'event',
+        'subprop_key': 'seats',
+        'subprop_op': 'greater',
+        'subprop_value': [0]
+    }])
 ]}
 
-# CR Inbound Seat
+# CR Inbound Seat (El filtro va en el EVENTO FINAL usando propiedades nativas de payment_confirmation_loaded)
 CR_INBOUND_SEAT = {'events': [
     ('inbound_seat_selected', []),
-    ('revenue_amount', [])
+    ('payment_confirmation_loaded', [{
+        'subprop_type': 'event',
+        'subprop_key': 'seats',
+        'subprop_op': 'greater',
+        'subprop_value': [0]
+    }])
 ]}
 

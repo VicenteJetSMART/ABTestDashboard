@@ -18,7 +18,7 @@ NSR_PAYMENT_DB = {'events': [
 # Website Conversion Rate from Payment - General
 WCR_PAYMENT = {'events': [
     ('payment_dom_loaded', []),
-    ('revenue_amount', [])
+    ('payment_confirmation_loaded', [])
 ]}
 
 # Website Conversion Rate from Payment - DB
@@ -60,6 +60,6 @@ TOGGLE_TAXES_RATE = {'events': [
 # Payment to Revenue (Final Conversion)
 PAYMENT_TO_REVENUE = {'events': [
     ('payment_confirmation_loaded', []),
-    ('revenue_amount', [])
+    ('payment_confirmation_loaded', [])
 ]}
 

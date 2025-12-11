@@ -35,14 +35,14 @@ NSR_BAGGAGE_DB = {'events': [
 # Website Conversion Rate from Baggage - General
 WCR_BAGGAGE = {'events': [
     ('baggage_dom_loaded', []),
-    ('revenue_amount', [])
+    ('payment_confirmation_loaded', [])
 ]}
 
 # Website Conversion Rate from Baggage - Vuela Ligero
 # Ojo los Custom Events parten con 'ce:'
 WCR_BAGGAGE_VUELA_LIGERO = {'events': [
     ('ce:(NEW) baggage_dom_loaded_with_vuela_ligero', []),
-    ('revenue_amount', [])
+    ('payment_confirmation_loaded', [])
 ]}
 
 # Cabin Bag A2C - General
@@ -101,30 +101,31 @@ ADD_TO_CART_ANCILLARY_MODAL = {'events': [
 
 # ===== CONVERSION RATE (CR) - Baggage =====
 
-# CR Cabin Bag (El filtro va en el PRIMER evento)
+# CR Cabin Bag (El filtro va en el EVENTO FINAL usando propiedades nativas de payment_confirmation_loaded)
+# NOTA: La propiedad se llama 'cabing_bag' (con 'g' extra) según el esquema real de Amplitude
 CR_CABIN_BAG = {'events': [
-    ('seatmap_dom_loaded', [{
+    ('seatmap_dom_loaded', []),
+    ('payment_confirmation_loaded', [{
         'subprop_type': 'event',
-        'subprop_key': 'cabin_bag_count',
-        'subprop_op': 'is not',
+        'subprop_key': 'cabing_bag',
+        'subprop_op': 'greater',
         'subprop_value': [0]
-    }]),
-    ('revenue_amount', [])
+    }])
 ]}
 
-# CR Checked Bag (El filtro va en el PRIMER evento)
+# CR Checked Bag (El filtro va en el EVENTO FINAL usando propiedades nativas de payment_confirmation_loaded)
 CR_CHECKED_BAG = {'events': [
-    ('seatmap_dom_loaded', [{
+    ('seatmap_dom_loaded', []),
+    ('payment_confirmation_loaded', [{
         'subprop_type': 'event',
-        'subprop_key': 'checked_bag_count',
-        'subprop_op': 'is not',
+        'subprop_key': 'checked_bag',
+        'subprop_op': 'greater',
         'subprop_value': [0]
-    }]),
-    ('revenue_amount', [])
+    }])
 ]}
 
 # CR Ancillary Modal
 CR_ANCILLARY_MODAL = {'events': [
     ('modal_ancillary_clicked', []),
-    ('revenue_amount', [])
+    ('payment_confirmation_loaded', [])
 ]}

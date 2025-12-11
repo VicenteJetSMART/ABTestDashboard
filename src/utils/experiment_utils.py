@@ -143,77 +143,105 @@ def get_funnel_data_experiment(api_key, secret_key, start_date, end_date, experi
 
 	# Construir filtros base de segmentación (siempre se aplican a todos los eventos)
 	# Estos son filtros globales que se aplican a todos los eventos del funnel
+	# CRÍTICO: Estos filtros DEBEN estar presentes en TODOS los eventos para mantener el cohorte
 	segmentation_filters = []
 
-	if culture != "All":
+	# Comparación case-insensitive para evitar problemas con "ALL", "All", "all"
+	# CRÍTICO: Normalizar valores a minúsculas antes de pasarlos a las funciones de filtros
+	# porque get_device_type espera 'mobile' o 'desktop' en minúsculas
+	if culture and str(culture).upper() != "ALL":
 		culture_filter = get_culture_digital_filter(culture)
-		if culture_filter:  # Solo agregar si no está vacío
+		if culture_filter:  # Solo agregar si no está vacío (devuelve dict o "")
 			segmentation_filters.append(culture_filter)
 
-	if device != "All":
-		device_filter = get_device_type(device)
-		if device_filter:  # Solo agregar si no está vacío
+	if device and str(device).upper() != "ALL":
+		# Normalizar device a minúsculas porque get_device_type espera 'mobile' o 'desktop'
+		device_normalized = str(device).lower().strip()
+		device_filter = get_device_type(device_normalized)
+		# get_device_type devuelve dict si encuentra, [] si no encuentra
+		if device_filter and isinstance(device_filter, dict):  # Solo agregar si es un dict válido
 			segmentation_filters.append(device_filter)
+		elif device_filter == []:
+			# Si devuelve lista vacía, el valor no es reconocido
+			# Intentar con el valor original por si acaso
+			device_filter_alt = get_device_type(device)
+			if device_filter_alt and isinstance(device_filter_alt, dict):
+				segmentation_filters.append(device_filter_alt)
 
-	# Construir event_filters_grouped con filtros de segmentación + filtros contextuales por evento
-	# ESTRATEGIA: El filtro flow_type se aplica SOLO al primer evento del funnel.
-	# Al filtrar el primer evento, Amplitude segmenta a los usuarios que cumplen esa condición,
-	# y los eventos siguientes del funnel contarán las acciones de esos usuarios filtrados.
+	# ============================================================
+	# CONSOLIDACIÓN: Construir lista unificada de TODOS los filtros globales
+	# ============================================================
+	# CRÍTICO: Todos los filtros globales deben aplicarse a TODOS los eventos
+	# para garantizar la integridad del cohorte en todo el funnel
+	
+	# PASO B: Construir filtros contextuales (Flow Type, Bundle Profile, Trip Type, Pax Adult Count)
+	# Verificar primero si la métrica tiene filtros explícitos para evitar duplicados
+	has_explicit_flow_type_filter = False
+	has_explicit_trip_type_filter = False
+	has_explicit_bundle_filter = False
+	has_explicit_pax_filter = False
+	
+	# Revisar todos los eventos en event_filters_map para detectar filtros explícitos
+	if event_filters_map:
+		for event_name, filters in event_filters_map.items():
+			if filters:
+				filters_list = filters if isinstance(filters, list) else [filters]
+				for filt in filters_list:
+					if isinstance(filt, dict):
+						subprop_key = filt.get('subprop_key')
+						if subprop_key == 'flow_type':
+							has_explicit_flow_type_filter = True
+						elif subprop_key == 'trip_type':
+							has_explicit_trip_type_filter = True
+						elif subprop_key == 'bundle_profile' or 'bundle' in str(subprop_key).lower():
+							has_explicit_bundle_filter = True
+						elif subprop_key == 'pax_adult_count' or 'pax' in str(subprop_key).lower():
+							has_explicit_pax_filter = True
+	
+	# ============================================================
+	# CONSTRUCCIÓN DE EVENTOS: Aplicar TODOS los filtros a TODOS los eventos
+	# CON MAPEO DE PROPIEDADES SEGÚN EL TIPO DE EVENTO
+	# ============================================================
 	event_filters_grouped = []
 	for idx, event in enumerate(event_list):
-		# Empezar con los filtros de segmentación (siempre se aplican a todos los eventos)
-		event_filters = segmentation_filters.copy()
+		# PASO A: Iniciar lista de filtros para este evento
+		event_filters = []
 		
-		# Verificar si el evento tiene filtros adicionales específicos definidos en la métrica
-		has_explicit_flow_type_filter = False
-		has_explicit_trip_type_filter = False
-		if event_filters_map and event in event_filters_map:
-			additional_filters = event_filters_map[event]
-			if additional_filters:
-				filters_list = additional_filters if isinstance(additional_filters, list) else [additional_filters]
-				# Verificar si alguno de los filtros es un filtro de flow_type o trip_type
-				for filt in filters_list:
-					# Comparar si el filtro es equivalente al filtro de flow_type
-					if isinstance(filt, dict) and filt.get('subprop_key') == 'flow_type':
-						has_explicit_flow_type_filter = True
-					# Comparar si el filtro es equivalente al filtro de trip_type
-					if isinstance(filt, dict) and filt.get('subprop_key') == 'trip_type':
-						has_explicit_trip_type_filter = True
+		# PASO B: Agregar SIEMPRE los filtros de segmentación (Device, Culture)
+		# Estos filtros garantizan que el cohorte sea consistente en todo el funnel
+		event_filters.extend(segmentation_filters)
 		
-		# Aplicar filtros contextuales SOLO al primer evento del funnel (idx == 0)
-		# Esto segmenta a los usuarios desde el inicio, y los eventos siguientes
-		# contarán las acciones de esos usuarios filtrados sin necesidad de que
-		# cada evento tenga explícitamente estas propiedades
+		# PASO C: Construir filtros contextuales - TODOS los filtros se aplican a TODOS los eventos
+		# payment_confirmation_loaded soporta todas las propiedades (pax_adult_count, flow_type, trip_type, bundle, etc.)
+		# por lo que no necesitamos excepciones ni mapeos especiales
 		
-		if idx == 0:
-			# Aplicar filtro flow_type si está configurado y no está explícitamente en la métrica
-			if flow_type != "ALL" and not has_explicit_flow_type_filter:
-				flow_type_filter = get_flow_type_filter(flow_type)
-				if flow_type_filter:  # Solo agregar si no está vacío
-					event_filters.append(flow_type_filter)
-			
-			# Aplicar filtros de bundle profile si está configurado
-			# Estos filtros se extienden (no reemplazan) los filtros existentes
-			if bundle_profile != "ALL":
-				bundle_filters = get_bundle_filters(bundle_profile)
-				if bundle_filters:  # Solo agregar si la lista no está vacía
-					event_filters.extend(bundle_filters)
-			
-			# Aplicar filtro trip_type si está configurado y no está explícitamente en la métrica
-			if trip_type != "ALL" and not has_explicit_trip_type_filter:
-				trip_type_filter = get_trip_type_filter(trip_type)
-				if trip_type_filter:  # Solo agregar si no está vacío
-					event_filters.append(trip_type_filter)
-			
-			# Aplicar filtro pax_adult_count si está configurado
-			# Este filtro se aplica al primer evento para segmentar por cantidad de adultos
-			if pax_adult_count != "ALL":
-				pax_adult_count_filter = get_pax_adult_count_filter(pax_adult_count)
-				if pax_adult_count_filter:  # Solo agregar si no está vacío
-					event_filters.append(pax_adult_count_filter)
+		# Flow Type: Agregar SIEMPRE
+		if flow_type and str(flow_type).upper() != "ALL" and not has_explicit_flow_type_filter:
+			flow_type_filter = get_flow_type_filter(flow_type)
+			if flow_type_filter:
+				event_filters.append(flow_type_filter)
 		
-		# Agregar filtros adicionales específicos de este evento si existen
-		# Estos filtros pueden incluir filtros de flow_type o bundle explícitos definidos en la métrica
+		# Trip Type: Agregar SIEMPRE
+		if trip_type and str(trip_type).upper() != "ALL" and not has_explicit_trip_type_filter:
+			trip_type_filter = get_trip_type_filter(trip_type)
+			if trip_type_filter:
+				event_filters.append(trip_type_filter)
+		
+		# Bundle Profile: Agregar SIEMPRE (payment_confirmation_loaded soporta bundle_smart_count y bundle_full_count)
+		if bundle_profile and str(bundle_profile).upper() != "ALL" and not has_explicit_bundle_filter:
+			bundle_filters = get_bundle_filters(bundle_profile)
+			if bundle_filters:
+				event_filters.extend(bundle_filters)
+		
+		# Pax Adult Count: Agregar SIEMPRE (payment_confirmation_loaded usa 'pax_adult_count' como todos los eventos normales)
+		if pax_adult_count and str(pax_adult_count).upper() != "ALL" and not has_explicit_pax_filter:
+			pax_adult_count_filter = get_pax_adult_count_filter(pax_adult_count)
+			if pax_adult_count_filter:
+				event_filters.append(pax_adult_count_filter)
+		
+		# PASO D: Agregar filtros específicos de la métrica si existen para este evento
+		# Estos filtros se agregan DESPUÉS de los globales, permitiendo que la métrica
+		# tenga filtros adicionales específicos sin perder los filtros globales
 		if event_filters_map and event in event_filters_map:
 			additional_filters = event_filters_map[event]
 			if additional_filters:
@@ -271,9 +299,140 @@ def get_funnel_data_experiment(api_key, secret_key, start_date, end_date, experi
 		'Authorization': f'Basic {api_key}:{secret_key}'
 	}
 	
-	response = requests.get(url, headers=headers, params=params, auth=HTTPBasicAuth(api_key, secret_key))
+	# ============================================================
+	# DEBUG: Instrumentación para auditoría de filtros
+	# ============================================================
+	# Verificar integridad de filtros antes de enviar
+	debug_warnings = []
 	
-	return response.json()
+	# Verificar que los filtros de segmentación estén presentes en todos los eventos
+	if segmentation_filters:
+		for event_obj in event_filters_grouped:
+			event_name = event_obj.get('event_type', 'unknown')
+			event_filters = event_obj.get('filters', [])
+			
+			# Verificar que los filtros de segmentación estén presentes
+			has_device_filter = any(
+				f.get('subprop_key') == 'device_type' 
+				for f in event_filters 
+				if isinstance(f, dict)
+			) if device and str(device).upper() != "ALL" else True
+			
+			has_culture_filter = any(
+				f.get('subprop_key') == 'culture' 
+				for f in event_filters 
+				if isinstance(f, dict)
+			) if culture and str(culture).upper() != "ALL" else True
+			
+			if device and str(device).upper() != "ALL" and not has_device_filter:
+				debug_warnings.append(f"⚠️ Evento '{event_name}' NO tiene filtro de device (esperado: {device})")
+			
+			if culture and str(culture).upper() != "ALL" and not has_culture_filter:
+				debug_warnings.append(f"⚠️ Evento '{event_name}' NO tiene filtro de culture (esperado: {culture})")
+	
+	# Mostrar debug si hay advertencias o si está en modo debug
+	try:
+		import streamlit as st
+		show_debug = (
+			len(debug_warnings) > 0 or 
+			(hasattr(st, 'session_state') and st.session_state.get('debug_mode', False))
+		)
+		
+		if show_debug:
+			debug_info = {
+				'experiment_id': experiment_id,
+				'variant': variant,
+				'device': device,
+				'culture': culture,
+				'flow_type': flow_type,
+				'bundle_profile': bundle_profile,
+				'trip_type': trip_type,
+				'pax_adult_count': pax_adult_count,
+				'segmentation_filters_count': len(segmentation_filters),
+				'segmentation_filters': segmentation_filters,
+				'events_with_filters': [],
+				'warnings': debug_warnings
+			}
+			
+			# Analizar cada evento y sus filtros
+			for event_obj in event_filters_grouped:
+				event_name = event_obj.get('event_type', 'unknown')
+				event_filters = event_obj.get('filters', [])
+				
+				# Identificar tipos de filtros presentes
+				filter_types = []
+				for f in event_filters:
+					if isinstance(f, dict):
+						filter_key = f.get('subprop_key', 'unknown')
+						filter_types.append(filter_key)
+				
+				debug_info['events_with_filters'].append({
+					'event': event_name,
+					'total_filters': len(event_filters),
+					'filter_types': filter_types,
+					'filters': event_filters
+				})
+			
+			# Mostrar debug
+			with st.expander(f"🕵️ DEBUG PAYLOAD - Variant: {variant}", expanded=(len(debug_warnings) > 0)):
+				if debug_warnings:
+					for warning in debug_warnings:
+						st.warning(warning)
+				st.json(debug_info)
+				st.write("**Event Filters Grouped (JSON):**")
+				st.json(event_filters_grouped)
+				st.write("**Params enviados a Amplitude (primeros 1000 chars):**")
+				params_str = json.dumps(params, indent=2)
+				st.text(params_str[:1000] + ("..." if len(params_str) > 1000 else ""))
+	except Exception:
+		# Si streamlit no está disponible o hay error, continuar sin debug
+		pass
+	
+	try:
+		response = requests.get(url, headers=headers, params=params, auth=HTTPBasicAuth(api_key, secret_key))
+		response.raise_for_status()  # Lanza excepción si el status code indica error
+		
+		response_json = response.json()
+		
+		# Verificar si la API devolvió un error
+		if 'error' in response_json:
+			error_msg = response_json.get('error', 'Error desconocido de Amplitude')
+			error_details = response_json.get('errorDetails', '')
+			raise ValueError(
+				f"🚨 API Error de Amplitude: {error_msg}\n"
+				f"Detalles: {error_details}\n"
+				f"Payload enviado: {json.dumps(params, indent=2)}"
+			)
+		
+		# Verificar si la respuesta tiene estructura esperada
+		if 'data' not in response_json and 'error' not in response_json:
+			raise ValueError(
+				f"🚨 Respuesta inesperada de Amplitude. Claves disponibles: {list(response_json.keys())}\n"
+				f"Payload enviado: {json.dumps(params, indent=2)}\n"
+				f"Response (primeros 500 caracteres): {str(response_json)[:500]}"
+			)
+		
+		return response_json
+		
+	except requests.exceptions.HTTPError as e:
+		# Error HTTP (4xx, 5xx)
+		error_msg = f"🚨 HTTP Error {response.status_code} de Amplitude"
+		try:
+			error_response = response.json()
+			if 'error' in error_response:
+				error_msg += f": {error_response['error']}"
+		except:
+			error_msg += f": {response.text[:500]}"
+		raise ValueError(
+			f"{error_msg}\n"
+			f"Payload enviado: {json.dumps(params, indent=2)}"
+		)
+	except requests.exceptions.RequestException as e:
+		# Error de conexión, timeout, etc.
+		raise ValueError(
+			f"🚨 Error de conexión con Amplitude: {str(e)}\n"
+			f"Payload enviado: {json.dumps(params, indent=2)}"
+		)
 
 
 def get_variant_funnel(variant):
@@ -308,12 +467,39 @@ def get_variant_funnel(variant):
         'Event Count': []
     })
 
-    variant_data = variant['Data']
+    variant_data = variant.get('Data', {})
     
+    # Si variant_data está vacío o no existe, verificar si hay un error en la respuesta
+    if not variant_data:
+        error_info = variant.get('error', 'Error desconocido')
+        error_details = variant.get('errorDetails', '')
+        experiment_id = variant.get('ExperimentID', 'N/A')
+        variant_name = variant.get('Variant', 'N/A')
+        raise ValueError(
+            f"🚨 No se recibieron datos de Amplitude para la variante '{variant_name}' del experimento '{experiment_id}'\n"
+            f"Error: {error_info}\n"
+            f"Detalles: {error_details}"
+        )
     
     # Verificar si existe la clave 'data'
     if 'data' not in variant_data:
-        raise KeyError(f"No existe la clave 'data' en variant_data. Keys disponibles: {list(variant_data.keys())}")
+        # Si hay un error en la respuesta, exponerlo
+        if 'error' in variant_data:
+            error_msg = variant_data.get('error', 'Error desconocido de Amplitude')
+            error_details = variant_data.get('errorDetails', '')
+            experiment_id = variant.get('ExperimentID', 'N/A')
+            variant_name = variant.get('Variant', 'N/A')
+            raise ValueError(
+                f"🚨 API Error de Amplitude para la variante '{variant_name}' del experimento '{experiment_id}':\n"
+                f"Error: {error_msg}\n"
+                f"Detalles: {error_details}\n"
+                f"Keys disponibles en la respuesta: {list(variant_data.keys())}"
+            )
+        else:
+            raise KeyError(
+                f"No existe la clave 'data' en variant_data. Keys disponibles: {list(variant_data.keys())}\n"
+                f"Variant: {variant.get('Variant', 'N/A')}, ExperimentID: {variant.get('ExperimentID', 'N/A')}"
+            )
     
     
     # Normalizar estructura: puede venir lista o dict
@@ -389,12 +575,39 @@ def get_variant_funnel_cum(variant, actual_start_date=None, actual_end_date=None
         'Event Count': []
     })
 
-    variant_data = variant['Data']
+    variant_data = variant.get('Data', {})
     
+    # Si variant_data está vacío o no existe, verificar si hay un error en la respuesta
+    if not variant_data:
+        error_info = variant.get('error', 'Error desconocido')
+        error_details = variant.get('errorDetails', '')
+        experiment_id = variant.get('ExperimentID', 'N/A')
+        variant_name = variant.get('Variant', 'N/A')
+        raise ValueError(
+            f"🚨 No se recibieron datos de Amplitude para la variante '{variant_name}' del experimento '{experiment_id}'\n"
+            f"Error: {error_info}\n"
+            f"Detalles: {error_details}"
+        )
     
     # Verificar si existe la clave 'data'
     if 'data' not in variant_data:
-        raise KeyError(f"No existe la clave 'data' en variant_data. Keys disponibles: {list(variant_data.keys())}")
+        # Si hay un error en la respuesta, exponerlo
+        if 'error' in variant_data:
+            error_msg = variant_data.get('error', 'Error desconocido de Amplitude')
+            error_details = variant_data.get('errorDetails', '')
+            experiment_id = variant.get('ExperimentID', 'N/A')
+            variant_name = variant.get('Variant', 'N/A')
+            raise ValueError(
+                f"🚨 API Error de Amplitude para la variante '{variant_name}' del experimento '{experiment_id}':\n"
+                f"Error: {error_msg}\n"
+                f"Detalles: {error_details}\n"
+                f"Keys disponibles en la respuesta: {list(variant_data.keys())}"
+            )
+        else:
+            raise KeyError(
+                f"No existe la clave 'data' en variant_data. Keys disponibles: {list(variant_data.keys())}\n"
+                f"Variant: {variant.get('Variant', 'N/A')}, ExperimentID: {variant.get('ExperimentID', 'N/A')}"
+            )
     
     
     # Normalizar estructura: puede venir lista o dict

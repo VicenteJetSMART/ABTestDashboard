@@ -174,12 +174,13 @@ def get_trip_type_filter(trip_type):
     }
     return switch.get(trip_type, "")
 
-def get_pax_adult_count_filter(pax_adult_count):
+def get_pax_adult_count_filter(pax_adult_count, event_name=None):
     """
     Obtiene el filtro de Amplitude para pax_adult_count (Cantidad de Adultos).
     
     Args:
         pax_adult_count: Cantidad de adultos ('ALL', '1 Adulto', '2 Adultos', '3 Adultos', '4+ Adultos')
+        event_name: Nombre del evento (opcional, mantenido para compatibilidad hacia atrás, pero ya no se usa)
         
     Returns:
         dict: Filtro de Amplitude para pax_adult_count, o cadena vacía si es 'ALL'
@@ -187,28 +188,31 @@ def get_pax_adult_count_filter(pax_adult_count):
     if pax_adult_count == "ALL":
         return ""
     
+    # Todos los eventos (incluyendo payment_confirmation_loaded) usan 'pax_adult_count'
+    prop_key = "pax_adult_count"
+    
     switch = {
         "1 Adulto": {
             "subprop_type": "event",
-            "subprop_key": "pax_adult_count",
+            "subprop_key": prop_key,
             "subprop_op": "is",
             "subprop_value": [1]
         },
         "2 Adultos": {
             "subprop_type": "event",
-            "subprop_key": "pax_adult_count",
+            "subprop_key": prop_key,
             "subprop_op": "is",
             "subprop_value": [2]
         },
         "3 Adultos": {
             "subprop_type": "event",
-            "subprop_key": "pax_adult_count",
+            "subprop_key": prop_key,
             "subprop_op": "is",
             "subprop_value": [3]
         },
         "4+ Adultos": {
             "subprop_type": "event",
-            "subprop_key": "pax_adult_count",
+            "subprop_key": prop_key,
             "subprop_op": "greater_or_equal",
             "subprop_value": [4]
         },
