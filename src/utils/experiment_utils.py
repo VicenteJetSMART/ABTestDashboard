@@ -13,7 +13,7 @@ import pandas as pd
 import requests
 from requests.auth import HTTPBasicAuth
 from datetime import datetime
-from src.utils.amplitude_filters import get_culture_digital_filter, get_device_type, get_flow_type_filter, get_bundle_filters, get_trip_type_filter, get_pax_adult_count_filter
+from src.utils.amplitude_filters import get_culture_digital_filter, get_device_type, get_flow_type_filter, get_bundle_filters, get_trip_type_filter, get_pax_adult_count_filter, get_travel_group_filter
 import sys
 from io import StringIO
 
@@ -114,7 +114,7 @@ def normalize_date_for_amplitude(date_input, default_time="00:00:00", is_end_dat
     # Formatear como YYYYMMDDHHmmss para la API de Amplitude
     return dt.strftime('%Y%m%d%H%M%S')
 
-def get_funnel_data_experiment(api_key, secret_key, start_date, end_date, experiment_id, device, variant, culture, event_list, conversion_window=1800, event_filters_map=None, flow_type="ALL", bundle_profile="ALL", trip_type="ALL", pax_adult_count="ALL"):
+def get_funnel_data_experiment(api_key, secret_key, start_date, end_date, experiment_id, device, variant, culture, event_list, conversion_window=1800, event_filters_map=None, flow_type="ALL", bundle_profile="ALL", trip_type="ALL", pax_adult_count="ALL", travel_group="ALL", hidden_first_step=False):
 	"""
 	Obtiene datos de funnel desde la API de Amplitude para un experimento específico.
 	
@@ -135,6 +135,7 @@ def get_funnel_data_experiment(api_key, secret_key, start_date, end_date, experi
 		bundle_profile: Perfil de bundle ('ALL', 'Vuela Ligero', 'Smart', 'Full', 'Smart + Full')
 		trip_type: Tipo de viaje ('ALL', 'Solo Ida (One Way)', 'Ida y Vuelta (Round Trip)')
 		pax_adult_count: Cantidad de adultos ('ALL', '1 Adulto', '2 Adultos', '3 Adultos', '4+ Adultos')
+		hidden_first_step: Si es True, aplica "Inmunidad Contextual": solo filtra Flow/Trip/Bundle en el paso 0 (ancla)
 		
 	Returns:
 		dict: Respuesta JSON de la API de Amplitude con los datos del funnel
@@ -219,7 +220,7 @@ def get_funnel_data_experiment(api_key, secret_key, start_date, end_date, experi
 		# Estos filtros garantizan que el cohorte sea consistente en todo el funnel
 		event_filters.extend(segmentation_filters)
 		
-		# PASO C: Construir filtros contextuales - TODOS los filtros se aplican a TODOS los eventos
+		# PASO C: Construir filtros contextuales con "Inmunidad Contextual" para Ghost Anchors
 		# EXCEPCIÓN: payment_confirmation_loaded tiene propiedades rotas/vacías para flow_type y bundle_profile.
 		# - flow_type: Propiedad rota/vacía (siempre da 0 al filtrar)
 		# - bundle_profile: No tiene bundle_smart_count ni bundle_full_count (solo strings de nombres)
@@ -228,29 +229,53 @@ def get_funnel_data_experiment(api_key, secret_key, start_date, end_date, experi
 		# Detectar si el evento actual es payment_confirmation_loaded (propiedades flow_type y bundle_profile rotas)
 		is_payment_confirmation = event_name and 'payment_confirmation_loaded' in str(event_name).lower()
 		
-		# Flow Type: Agregar SIEMPRE EXCEPTO en payment_confirmation_loaded (propiedad rota)
-		if flow_type and str(flow_type).upper() != "ALL" and not has_explicit_flow_type_filter and not is_payment_confirmation:
+		# ============================================================
+		# INMUNIDAD CONTEXTUAL: Regla de exclusión de filtros para Ghost Anchors
+		# ============================================================
+		# Si hay un Ghost Anchor activo (hidden_first_step == True):
+		# - Paso 0 (Ancla): APLICAR TODOS los filtros (Strict Mode) - aquí filtramos el cohorte
+		# - Pasos Intermedios (idx > 0): SKIP filtros Flow/Trip/Bundle (confiamos en el filtro del Paso 0)
+		# - Paso Final (payment_confirmation_loaded): Mantener lógica especial existente
+		# ============================================================
+		should_skip_context = False
+		if hidden_first_step and idx > 0:
+			# Si tenemos un ancla fantasma activa y NO es el primer evento (el ancla), relajamos los filtros
+			should_skip_context = True
+		
+		# Flow Type: Agregar según reglas de Inmunidad Contextual
+		if flow_type and str(flow_type).upper() != "ALL" and not has_explicit_flow_type_filter and not is_payment_confirmation and not should_skip_context:
 			flow_type_filter = get_flow_type_filter(flow_type)
 			if flow_type_filter:
 				event_filters.append(flow_type_filter)
 		
-		# Trip Type: Agregar SIEMPRE (esta propiedad funciona correctamente en payment_confirmation_loaded)
-		if trip_type and str(trip_type).upper() != "ALL" and not has_explicit_trip_type_filter:
+		# Trip Type: Agregar según reglas de Inmunidad Contextual
+		if trip_type and str(trip_type).upper() != "ALL" and not has_explicit_trip_type_filter and not should_skip_context:
 			trip_type_filter = get_trip_type_filter(trip_type)
 			if trip_type_filter:
 				event_filters.append(trip_type_filter)
 		
-		# Bundle Profile: Agregar SIEMPRE EXCEPTO en payment_confirmation_loaded (no tiene bundle_smart_count ni bundle_full_count)
-		if bundle_profile and str(bundle_profile).upper() != "ALL" and not has_explicit_bundle_filter and not is_payment_confirmation:
+		# Bundle Profile: Agregar según reglas de Inmunidad Contextual
+		if bundle_profile and str(bundle_profile).upper() != "ALL" and not has_explicit_bundle_filter and not is_payment_confirmation and not should_skip_context:
 			bundle_filters = get_bundle_filters(bundle_profile)
 			if bundle_filters:
 				event_filters.extend(bundle_filters)
 		
-		# Pax Adult Count: Agregar SIEMPRE (payment_confirmation_loaded usa 'pax_adult_count' como todos los eventos normales)
-		if pax_adult_count and str(pax_adult_count).upper() != "ALL" and not has_explicit_pax_filter:
-			pax_adult_count_filter = get_pax_adult_count_filter(pax_adult_count)
-			if pax_adult_count_filter:
-				event_filters.append(pax_adult_count_filter)
+		# Travel Group: Agregar según reglas de Inmunidad Contextual
+		# CRÍTICO: Verificar si debemos saltar contexto (para eventos intermedios ciegos como extra_selected)
+		# La única excepción es payment_confirmation_loaded que siempre acepta pax counts.
+		if travel_group and str(travel_group).upper() != "ALL":
+			# Aplicar filtro SI: (No estamos en modo skip) O (Es el evento de pago)
+			if not should_skip_context or is_payment_confirmation:
+				travel_group_filters = get_travel_group_filter(travel_group)
+				if travel_group_filters:
+					event_filters.extend(travel_group_filters)
+		# Pax Adult Count: Agregar SIEMPRE si travel_group no está disponible (compatibilidad hacia atrás)
+		# También protegido por should_skip_context
+		elif pax_adult_count and str(pax_adult_count).upper() != "ALL" and not has_explicit_pax_filter:
+			if not should_skip_context or is_payment_confirmation:
+				pax_adult_count_filter = get_pax_adult_count_filter(pax_adult_count)
+				if pax_adult_count_filter:
+					event_filters.append(pax_adult_count_filter)
 		
 		# PASO D: Agregar filtros específicos de la métrica si existen para este evento
 		# Estos filtros se agregan DESPUÉS de los globales, permitiendo que la métrica
@@ -699,7 +724,9 @@ def get_control_treatment_raw_data(
     flow_type="ALL",
     bundle_profile="ALL",
     trip_type="ALL",
-    pax_adult_count="ALL"
+    pax_adult_count="ALL",
+    travel_group="ALL",
+    hidden_first_step=False
 ):
     """
     Obtiene los datos raw de control y treatment para un experimento.
@@ -744,7 +771,9 @@ def get_control_treatment_raw_data(
         flow_type,
         bundle_profile,
         trip_type,
-        pax_adult_count
+        pax_adult_count,
+        travel_group,
+        hidden_first_step
     )
     
     
@@ -763,7 +792,9 @@ def get_control_treatment_raw_data(
         flow_type,
         bundle_profile,
         trip_type,
-        pax_adult_count
+        pax_adult_count,
+        travel_group,
+        hidden_first_step
     )
     
     
@@ -787,7 +818,7 @@ def get_control_treatment_raw_data(
     return control, treatment
 
 
-def final_pipeline(start_date, end_date, experiment_id, device, culture, event_list, conversion_window=1800, event_filters_map=None, flow_type="ALL", bundle_profile="ALL", trip_type="ALL", pax_adult_count="ALL"):
+def final_pipeline(start_date, end_date, experiment_id, device, culture, event_list, conversion_window=1800, event_filters_map=None, flow_type="ALL", bundle_profile="ALL", trip_type="ALL", pax_adult_count="ALL", travel_group="ALL", hidden_first_step=False):
     """
     Pipeline completo para análisis de experimentos AB Test.
     
@@ -805,6 +836,7 @@ def final_pipeline(start_date, end_date, experiment_id, device, culture, event_l
         bundle_profile: Perfil de bundle ('ALL', 'Vuela Ligero', 'Smart', 'Full', 'Smart + Full')
         trip_type: Tipo de viaje ('ALL', 'Solo Ida (One Way)', 'Ida y Vuelta (Round Trip)')
         pax_adult_count: Cantidad de adultos ('ALL', '1 Adulto', '2 Adultos', '3 Adultos', '4+ Adultos')
+        hidden_first_step: Si es True, aplica "Inmunidad Contextual": solo filtra Flow/Trip/Bundle en el paso 0 (ancla)
         
     Returns:
         pd.DataFrame: DataFrame combinado con datos de todas las variantes
@@ -1104,7 +1136,9 @@ def get_all_variants_raw_data(
     flow_type="ALL",
     bundle_profile="ALL",
     trip_type="ALL",
-    pax_adult_count="ALL"
+    pax_adult_count="ALL",
+    travel_group="ALL",
+    hidden_first_step=False
 ):
     """
     Obtiene los datos raw de todas las variantes de un experimento.
@@ -1123,6 +1157,7 @@ def get_all_variants_raw_data(
         bundle_profile: Perfil de bundle ('ALL', 'Vuela Ligero', 'Smart', 'Full', 'Smart + Full')
         trip_type: Tipo de viaje ('ALL', 'Solo Ida (One Way)', 'Ida y Vuelta (Round Trip)')
         pax_adult_count: Cantidad de adultos ('ALL', '1 Adulto', '2 Adultos', '3 Adultos', '4+ Adultos')
+        hidden_first_step: Si es True, aplica "Inmunidad Contextual": solo filtra Flow/Trip/Bundle en el paso 0 (ancla)
         
     Returns:
         list: Lista de diccionarios con datos de cada variante
@@ -1154,7 +1189,9 @@ def get_all_variants_raw_data(
             flow_type,
             bundle_profile,
             trip_type,
-            pax_adult_count
+            pax_adult_count,
+            travel_group,
+            hidden_first_step
         )
         
         variant_data = {
@@ -1171,7 +1208,7 @@ def get_all_variants_raw_data(
     return all_variants_data
 
 
-def final_pipeline_cumulative(start_date, end_date, experiment_id, device, culture, event_list, conversion_window=1800, event_filters_map=None, flow_type="ALL", bundle_profile="ALL", trip_type="ALL", pax_adult_count="ALL"):
+def final_pipeline_cumulative(start_date, end_date, experiment_id, device, culture, event_list, conversion_window=1800, event_filters_map=None, flow_type="ALL", bundle_profile="ALL", trip_type="ALL", pax_adult_count="ALL", travel_group="ALL", hidden_first_step=False):
     """
     Pipeline completo para análisis de experimentos AB Test con datos acumulados.
     
@@ -1189,6 +1226,7 @@ def final_pipeline_cumulative(start_date, end_date, experiment_id, device, cultu
         bundle_profile: Perfil de bundle ('ALL', 'Vuela Ligero', 'Smart', 'Full', 'Smart + Full')
         trip_type: Tipo de viaje ('ALL', 'Solo Ida (One Way)', 'Ida y Vuelta (Round Trip)')
         pax_adult_count: Cantidad de adultos ('ALL', '1 Adulto', '2 Adultos', '3 Adultos', '4+ Adultos')
+        hidden_first_step: Si es True, aplica "Inmunidad Contextual": solo filtra Flow/Trip/Bundle en el paso 0 (ancla)
         
     Returns:
         pd.DataFrame: DataFrame combinado con datos acumulados de todas las variantes
@@ -1206,7 +1244,9 @@ def final_pipeline_cumulative(start_date, end_date, experiment_id, device, cultu
         flow_type,
         bundle_profile,
         trip_type,
-        pax_adult_count
+        pax_adult_count,
+        travel_group,
+        hidden_first_step
     )
 
     # Procesar cada variante con datos acumulados

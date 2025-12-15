@@ -219,6 +219,119 @@ def get_pax_adult_count_filter(pax_adult_count, event_name=None):
     }
     return switch.get(pax_adult_count, "")
 
+def get_travel_group_filter(travel_group):
+    """
+    Obtiene los filtros de Amplitude para Travel Group (Grupo de Viaje).
+    
+    Args:
+        travel_group: Tipo de grupo de viaje ('ALL', 'Viajero Solo', 'Pareja', 'Grupo', 'Familia (con Niño)', 'Familia (con Infante)')
+        
+    Returns:
+        list: Lista de filtros de Amplitude para el grupo de viaje, o lista vacía si es 'ALL'
+    """
+    if travel_group == "ALL":
+        return []
+    
+    filters = []
+    
+    # Mapeo de Travel Group a filtros de Amplitude
+    if travel_group == "Viajero Solo":
+        # 1 adulto, sin niños, sin infantes
+        filters.append({
+            "subprop_type": "event",
+            "subprop_key": "pax_adult_count",
+            "subprop_op": "is",
+            "subprop_value": [1]
+        })
+        filters.append({
+            "subprop_type": "event",
+            "subprop_key": "pax_children_count",
+            "subprop_op": "is",
+            "subprop_value": [0]
+        })
+        filters.append({
+            "subprop_type": "event",
+            "subprop_key": "pax_infant_count",
+            "subprop_op": "is",
+            "subprop_value": [0]
+        })
+    elif travel_group == "Pareja":
+        # 2 adultos, sin niños, sin infantes
+        filters.append({
+            "subprop_type": "event",
+            "subprop_key": "pax_adult_count",
+            "subprop_op": "is",
+            "subprop_value": [2]
+        })
+        filters.append({
+            "subprop_type": "event",
+            "subprop_key": "pax_children_count",
+            "subprop_op": "is",
+            "subprop_value": [0]
+        })
+        filters.append({
+            "subprop_type": "event",
+            "subprop_key": "pax_infant_count",
+            "subprop_op": "is",
+            "subprop_value": [0]
+        })
+    elif travel_group == "Grupo":
+        # 3+ adultos, sin niños, sin infantes
+        filters.append({
+            "subprop_type": "event",
+            "subprop_key": "pax_adult_count",
+            "subprop_op": "greater_or_equal",
+            "subprop_value": [3]
+        })
+        filters.append({
+            "subprop_type": "event",
+            "subprop_key": "pax_children_count",
+            "subprop_op": "is",
+            "subprop_value": [0]
+        })
+        filters.append({
+            "subprop_type": "event",
+            "subprop_key": "pax_infant_count",
+            "subprop_op": "is",
+            "subprop_value": [0]
+        })
+    elif travel_group == "Familia (con Niño)":
+        # Al menos 1 adulto y al menos 1 niño, sin infantes
+        filters.append({
+            "subprop_type": "event",
+            "subprop_key": "pax_adult_count",
+            "subprop_op": "greater_or_equal",
+            "subprop_value": [1]
+        })
+        filters.append({
+            "subprop_type": "event",
+            "subprop_key": "pax_children_count",
+            "subprop_op": "greater_or_equal",
+            "subprop_value": [1]
+        })
+        filters.append({
+            "subprop_type": "event",
+            "subprop_key": "pax_infant_count",
+            "subprop_op": "is",
+            "subprop_value": [0]
+        })
+    elif travel_group == "Familia (con Infante)":
+        # Al menos 1 adulto y al menos 1 infante
+        filters.append({
+            "subprop_type": "event",
+            "subprop_key": "pax_adult_count",
+            "subprop_op": "greater_or_equal",
+            "subprop_value": [1]
+        })
+        filters.append({
+            "subprop_type": "event",
+            "subprop_key": "pax_infant_count",
+            "subprop_op": "greater_or_equal",
+            "subprop_value": [1]
+        })
+    
+    return filters
+
 def get_bundle_filters(profile_name):
     """
     Obtiene los filtros de Amplitude para el perfil de bundle.

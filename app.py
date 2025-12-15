@@ -19,6 +19,19 @@ from src.utils.experiment_utils import (
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 
+# ---------------------------------------------------------
+# CONFIGURACIÓN DE PARCHES TEMPORALES (GHOST ANCHORS)
+# Propósito: Usar un evento previo (_loaded) para filtrar contexto (Familia, Vuela Ligero)
+# en métricas que inician con eventos ciegos (_selected).
+# TO REVERT: Simplemente elimina la métrica de esta lista cuando los eventos selected tengan propiedades.
+# ---------------------------------------------------------
+GHOST_ANCHOR_CONFIG = {
+    'Cr Flexi': 'extras_dom_loaded',  # Métrica: Evento Ancla a inyectar
+    'Cr Cabin Bag': 'baggage_dom_loaded',  # Ejemplo si aplica
+    'Cr Checked Bag': 'baggage_dom_loaded',  # Ejemplo si aplica
+    # Agrega aquí cualquier otra métrica que empiece con _selected
+}
+
 # Lista completa de eventos disponibles en Amplitude
 AVAILABLE_EVENTS = [
     "homepage_dom_loaded", 
@@ -483,15 +496,15 @@ def run_ui():
                         )
                         conversion_window_quick = conversion_window_options_quick[conversion_window_label_quick]
                     
-                    # Tercera fila: Cantidad de Adultos
+                    # Tercera fila: Grupo de Viaje
                     col7, col8, col9 = st.columns(3)
                     with col7:
-                        pax_adult_count_quick = st.selectbox(
-                            "👥 Cantidad de Adultos",
-                            options=["ALL", "1 Adulto", "2 Adultos", "3 Adultos", "4+ Adultos"],
+                        travel_group_quick = st.selectbox(
+                            "👥 Grupo de Viaje",
+                            options=["ALL", "Viajero Solo", "Pareja", "Grupo", "Familia (con Niño)", "Familia (con Infante)"],
                             index=0,
-                            key="pax_adult_count_quick",
-                            help="Cantidad de adultos en la búsqueda (ALL = todas las cantidades)"
+                            key="travel_group_quick",
+                            help="Tipo de grupo de viaje (ALL = todos los grupos)"
                         )
                     
                     # Inicializar mapeo de filtros (se usará más adelante)
@@ -512,6 +525,41 @@ def run_ui():
                         
                         # Obtener todas las métricas en un diccionario plano
                         PREDEFINED_METRICS_QUICK = get_all_metrics_flat(metrics_by_category)
+                        
+                        # ---------------------------------------------------------
+                        # INYECCIÓN DINÁMICA DE GHOST ANCHORS
+                        # Modificar métricas que requieren evento ancla invisible
+                        # ---------------------------------------------------------
+                        for metric_name, anchor_event in GHOST_ANCHOR_CONFIG.items():
+                            if metric_name in PREDEFINED_METRICS_QUICK:
+                                metric_config = PREDEFINED_METRICS_QUICK[metric_name]
+                                
+                                # Verificar que la métrica tenga la estructura esperada
+                                if isinstance(metric_config, dict) and 'events' in metric_config:
+                                    events_list = metric_config['events']
+                                    
+                                    # Verificar que el primer evento no sea ya el evento ancla
+                                    if events_list:
+                                        first_event = events_list[0]
+                                        first_event_name = first_event[0] if isinstance(first_event, tuple) else first_event
+                                        
+                                        # Solo inyectar si el primer evento no es el ancla
+                                        if first_event_name != anchor_event:
+                                            # Crear una copia de la configuración para no modificar la original
+                                            modified_config = metric_config.copy()
+                                            modified_events = events_list.copy()
+                                            
+                                            # Insertar el evento ancla al inicio de la lista
+                                            anchor_tuple = (anchor_event, [])
+                                            modified_events.insert(0, anchor_tuple)
+                                            
+                                            modified_config['events'] = modified_events
+                                            
+                                            # Activar bandera hidden_first_step
+                                            modified_config['hidden_first_step'] = True
+                                            
+                                            # Actualizar la métrica en el diccionario
+                                            PREDEFINED_METRICS_QUICK[metric_name] = modified_config
                         
                         # Mostrar información de métricas disponibles
                         if PREDEFINED_METRICS_QUICK:
@@ -613,10 +661,16 @@ def run_ui():
                                 # Sin filtros para formato antiguo
                             
                             if metric_events:
+                                # Detectar si esta métrica tiene hidden_first_step (Ghost Anchor)
+                                hidden_first_step = False
+                                if isinstance(metric_config, dict):
+                                    hidden_first_step = metric_config.get('hidden_first_step', False)
+                                
                                 metrics_to_process.append({
                                     'name': metric_name,
                                     'events': metric_events,
-                                    'filters': metric_filters_map
+                                    'filters': metric_filters_map,
+                                    'hidden_first_step': hidden_first_step
                                 })
                         
                         # Agregar eventos individuales como una "métrica" adicional si están seleccionados
@@ -753,12 +807,16 @@ def run_ui():
                                         'flow_type': flow_type_quick,
                                         'bundle_profile': bundle_profile_quick,
                                         'trip_type': trip_type_quick,
-                                        'pax_adult_count': pax_adult_count_quick
+                                        'travel_group': travel_group_quick
                                     }
                                     
                                     # Agregar event_filters_map solo si existe y no está vacío
                                     if metric_filters:
                                         pipeline_kwargs['event_filters_map'] = metric_filters
+                                    
+                                    # Agregar hidden_first_step si la métrica lo tiene
+                                    if metric_info.get('hidden_first_step', False):
+                                        pipeline_kwargs['hidden_first_step'] = True
                                     
                                     try:
                                         if use_cumulative:
@@ -801,7 +859,7 @@ def run_ui():
                                     'flow_type': normalize_all_value(flow_type_quick),
                                     'bundle_profile': normalize_all_value(bundle_profile_quick),
                                     'trip_type': normalize_all_value(trip_type_quick),
-                                    'pax_adult_count': normalize_all_value(pax_adult_count_quick),
+                                    'travel_group': normalize_all_value(travel_group_quick),
                                     'conversion_window': conversion_window_quick,
                                     'use_cumulative': use_cumulative
                                 }
@@ -875,7 +933,7 @@ def run_ui():
                                         df_metric_copy['Flow Type'] = flow_type_quick
                                         df_metric_copy['Trip Type'] = trip_type_quick
                                         df_metric_copy['Flight Profile'] = bundle_profile_quick
-                                        df_metric_copy['Adults'] = pax_adult_count_quick
+                                        df_metric_copy['Travel Group'] = travel_group_quick
                                         
                                         # Formatear fechas como strings si existen
                                         if use_cumulative:
@@ -917,7 +975,7 @@ def run_ui():
                                     preferred_order = [
                                         'Métrica', 'Start Date', 'End Date', 'Date',
                                         'ExperimentID', 'Culture', 'Device',
-                                        'Flow Type', 'Trip Type', 'Flight Profile', 'Adults',
+                                        'Flow Type', 'Trip Type', 'Flight Profile', 'Travel Group',
                                         'Variant', 'Funnel Stage', 'Event Count'
                                     ]
                                     
@@ -1061,6 +1119,9 @@ def run_ui():
                             
                             # Determinar initial_stage y final_stage según el orden de eventos en la métrica
                             if metric_config and 'events' in metric_config and len(metric_config['events']) >= 2:
+                                # Verificar si esta métrica tiene hidden_first_step (Ghost Anchor)
+                                hidden_first_step = metric_config.get('hidden_first_step', False)
+                                
                                 # Extraer nombres de eventos (pueden ser tuplas o strings)
                                 event_names = []
                                 for event_item in metric_config['events']:
@@ -1068,6 +1129,42 @@ def run_ui():
                                         event_names.append(event_item[0])
                                     elif isinstance(event_item, str):
                                         event_names.append(event_item)
+                                
+                                # Si hidden_first_step == True, filtrar el stage del evento ancla de available_stages
+                                # y usar el segundo evento como initial_stage
+                                if hidden_first_step and len(event_names) >= 2:
+                                    # Identificar el stage del evento ancla (primer evento)
+                                    anchor_event_name = event_names[0]
+                                    
+                                    # Función auxiliar para normalizar nombres de eventos (definida más abajo)
+                                    def normalize_event_name_for_filter(name):
+                                        """Normaliza el nombre del evento para comparación"""
+                                        name = name.replace('[Amplitude]', '').strip()
+                                        if name.startswith('ce:'):
+                                            name = name[3:].strip()
+                                            if name.startswith('('):
+                                                end_paren = name.find(')')
+                                                if end_paren != -1:
+                                                    name = name[end_paren + 1:].strip()
+                                        return name.lower().strip()
+                                    
+                                    # Filtrar el stage del evento ancla de available_stages
+                                    normalized_anchor = normalize_event_name_for_filter(anchor_event_name)
+                                    available_stages_filtered = [
+                                        stage for stage in available_stages
+                                        if normalize_event_name_for_filter(stage) != normalized_anchor
+                                    ]
+                                    
+                                    # Si no quedan stages después de filtrar, usar todos (fallback)
+                                    if not available_stages_filtered:
+                                        available_stages_filtered = available_stages
+                                    
+                                    # Usar el segundo evento (índice 1) como initial_stage
+                                    # El último evento sigue siendo final_stage
+                                    event_names_for_stages = event_names[1:]  # Recortar el primer evento
+                                    available_stages = available_stages_filtered  # Actualizar available_stages
+                                else:
+                                    event_names_for_stages = event_names
                                 
                                 # Usar el orden de eventos de la métrica
                                 # Para WCR: conversión = payment_confirmation_loaded / baggage_dom_loaded
@@ -1153,11 +1250,12 @@ def run_ui():
                                     return None
                                 
                                 # Buscar el primer evento (initial_stage) - debe ser el denominador
-                                initial_stage = find_stage_by_event(event_names[0], available_stages)
+                                # Si hidden_first_step, usar el segundo evento (event_names_for_stages[0])
+                                initial_stage = find_stage_by_event(event_names_for_stages[0], available_stages)
                                 
                                 # Buscar el último evento (final_stage) - debe ser el numerador
                                 # Excluir initial_stage para asegurar que sean diferentes
-                                final_stage = find_stage_by_event(event_names[-1], available_stages, exclude_stage=initial_stage)
+                                final_stage = find_stage_by_event(event_names_for_stages[-1], available_stages, exclude_stage=initial_stage)
                                 
                                 # Si aún no se encuentran, usar orden alfabético como fallback
                                 # PERO asegurando que siempre sean diferentes
@@ -1211,9 +1309,39 @@ def run_ui():
                             
                             # Verificar que tenemos stages válidos y diferentes
                             if initial_stage and final_stage and initial_stage != final_stage:
-                                    # Preparar variantes
+                                    # Si hidden_first_step == True, filtrar el DataFrame para excluir el stage del evento ancla
+                                    df_analysis_filtered = df_analysis.copy()
+                                    if metric_config and metric_config.get('hidden_first_step', False):
+                                        # Obtener el nombre del evento ancla (primer evento)
+                                        anchor_event_name = None
+                                        if 'events' in metric_config and metric_config['events']:
+                                            first_event = metric_config['events'][0]
+                                            anchor_event_name = first_event[0] if isinstance(first_event, tuple) else first_event
+                                        
+                                        if anchor_event_name:
+                                            # Función auxiliar para normalizar nombres de eventos
+                                            def normalize_event_name_for_filter(name):
+                                                """Normaliza el nombre del evento para comparación"""
+                                                name = name.replace('[Amplitude]', '').strip()
+                                                if name.startswith('ce:'):
+                                                    name = name[3:].strip()
+                                                    if name.startswith('('):
+                                                        end_paren = name.find(')')
+                                                        if end_paren != -1:
+                                                            name = name[end_paren + 1:].strip()
+                                                return name.lower().strip()
+                                            
+                                            # Filtrar filas que corresponden al stage del evento ancla
+                                            normalized_anchor = normalize_event_name_for_filter(anchor_event_name)
+                                            df_analysis_filtered = df_analysis_filtered[
+                                                df_analysis_filtered['Funnel Stage'].apply(
+                                                    lambda stage: normalize_event_name_for_filter(stage) != normalized_anchor
+                                                )
+                                            ]
+                                    
+                                    # Preparar variantes usando el DataFrame filtrado
                                     variants = prepare_variants_from_dataframe(
-                                        df_analysis,
+                                        df_analysis_filtered,
                                         initial_stage=initial_stage,
                                         final_stage=final_stage
                                     )
@@ -1357,7 +1485,7 @@ def run_ui():
                     st.caption("Desglosa los resultados por diferentes dimensiones para encontrar insights ocultos")
                     
                     # Selector de desglose
-                    breakdown_options = ['Ninguno', 'Device', 'Culture', 'Flow Type', 'Trip Type', 'Flight Profile', 'Adults']
+                    breakdown_options = ['Ninguno', 'Device', 'Culture', 'Flow Type', 'Trip Type', 'Flight Profile', 'Travel Group']
                     breakdown_selected = st.radio(
                         "🔍 Desglosar resultados por:",
                         options=breakdown_options,
@@ -1393,7 +1521,7 @@ def run_ui():
                                 'Flow Type': ['DB', 'PB', 'CK'],  # Valores exactos de los selectores (sin 'ALL')
                                 'Trip Type': ['Solo Ida (One Way)', 'Ida y Vuelta (Round Trip)'],  # Valores exactos de los selectores (sin 'ALL')
                                 'Flight Profile': ['Vuela Ligero', 'Smart', 'Full', 'Smart + Full'],  # Valores exactos de los selectores (sin 'ALL')
-                                'Adults': ['1 Adulto', '2 Adultos', '3 Adultos', '4+ Adultos']  # Valores exactos de los selectores (sin 'ALL')
+                                'Travel Group': ['Viajero Solo', 'Pareja', 'Grupo', 'Familia (con Niño)', 'Familia (con Infante)']  # Valores exactos de los selectores (sin 'ALL')
                             }
                             
                             # Mapeo de desglose a parámetro de la función
@@ -1403,7 +1531,7 @@ def run_ui():
                                 'Flow Type': 'flow_type',
                                 'Trip Type': 'trip_type',
                                 'Flight Profile': 'bundle_profile',
-                                'Adults': 'pax_adult_count'
+                                'Travel Group': 'travel_group'
                             }
                             
                             breakdown_param = param_mapping.get(breakdown_selected)
@@ -1445,7 +1573,7 @@ def run_ui():
                                                     'flow_type': original_params.get('flow_type', 'ALL'),
                                                     'bundle_profile': original_params.get('bundle_profile', 'ALL'),
                                                     'trip_type': original_params.get('trip_type', 'ALL'),
-                                                    'pax_adult_count': original_params.get('pax_adult_count', 'ALL')
+                                                    'travel_group': original_params.get('travel_group', 'ALL')
                                                 }
                                                 
                                                 # Hacer consulta rápida
@@ -1531,12 +1659,16 @@ def run_ui():
                                                     'flow_type': get_safe_param('flow_type', 'ALL'),
                                                     'bundle_profile': get_safe_param('bundle_profile', 'ALL'),
                                                     'trip_type': get_safe_param('trip_type', 'ALL'),
-                                                    'pax_adult_count': get_safe_param('pax_adult_count', 'ALL'),
+                                                    'travel_group': get_safe_param('travel_group', 'ALL'),
                                                     
                                                     # Parámetros opcionales con defaults explícitos
                                                     'conversion_window': original_params.get('conversion_window', 1800),
                                                     'event_filters_map': metric_filters if metric_filters else None
                                                 }
+                                                
+                                                # Agregar hidden_first_step si la métrica lo tiene
+                                                if metric_info.get('hidden_first_step', False):
+                                                    query_params['hidden_first_step'] = True
                                                 
                                                 # Validar que los parámetros obligatorios no sean None
                                                 required_params = ['start_date', 'end_date', 'experiment_id', 'event_list']
@@ -1560,8 +1692,8 @@ def run_ui():
                                                     query_params['trip_type'] = segment_value
                                                 elif breakdown_selected == 'Flight Profile':
                                                     query_params['bundle_profile'] = segment_value
-                                                elif breakdown_selected == 'Adults':
-                                                    query_params['pax_adult_count'] = segment_value
+                                                elif breakdown_selected == 'Travel Group':
+                                                    query_params['travel_group'] = segment_value
                                                 
                                                 # ============================================================
                                                 # PASO 3: LLAMADA BLINDADA CON TODOS LOS PARÁMETROS EXPLÍCITOS
@@ -1599,12 +1731,41 @@ def run_ui():
                                                     
                                                     # Determinar stages
                                                     if metric_config and 'events' in metric_config and len(metric_config['events']) >= 2:
+                                                        # Verificar si esta métrica tiene hidden_first_step (Ghost Anchor)
+                                                        hidden_first_step = metric_config.get('hidden_first_step', False)
+                                                        
                                                         event_names = []
                                                         for event_item in metric_config['events']:
                                                             if isinstance(event_item, tuple) and len(event_item) > 0:
                                                                 event_names.append(event_item[0])
                                                             elif isinstance(event_item, str):
                                                                 event_names.append(event_item)
+                                                        
+                                                        # Si hidden_first_step == True, filtrar el stage del evento ancla
+                                                        if hidden_first_step and len(event_names) >= 2:
+                                                            anchor_event_name = event_names[0]
+                                                            
+                                                            def normalize_event_name_simple(name):
+                                                                name = name.replace('[Amplitude]', '').strip()
+                                                                if name.startswith('ce:'):
+                                                                    name = name[3:].strip()
+                                                                    if name.startswith('('):
+                                                                        end_paren = name.find(')')
+                                                                        if end_paren != -1:
+                                                                            name = name[end_paren + 1:].strip()
+                                                                return name.lower().strip()
+                                                            
+                                                            # Filtrar el stage del evento ancla
+                                                            normalized_anchor = normalize_event_name_simple(anchor_event_name)
+                                                            available_stages = [
+                                                                stage for stage in available_stages
+                                                                if normalize_event_name_simple(stage) != normalized_anchor
+                                                            ]
+                                                            
+                                                            if not available_stages:
+                                                                available_stages = df_segment['Funnel Stage'].unique().tolist()
+                                                            
+                                                            event_names = event_names[1:]  # Recortar el primer evento
                                                         
                                                         # Función auxiliar para encontrar stage
                                                         def normalize_event_name_simple(name):
@@ -1634,7 +1795,7 @@ def run_ui():
                                                                         return stage
                                                             return None
                                                         
-                                                        initial_stage = find_stage_robust(event_names[0], available_stages)
+                                                        initial_stage = find_stage_robust(event_names[0], available_stages) if event_names else None
                                                         final_stage = find_stage_robust(event_names[-1], available_stages, exclude_stage=initial_stage) if len(event_names) > 1 else None
                                                     
                                                     if not initial_stage or not final_stage:
@@ -1646,9 +1807,39 @@ def run_ui():
                                                 if not initial_stage or not final_stage or initial_stage == final_stage:
                                                     continue
                                                 
-                                                # Preparar variantes para este segmento
+                                                # Si hidden_first_step == True, filtrar el DataFrame para excluir el stage del evento ancla
+                                                df_segment_filtered = df_segment.copy()
+                                                if metric_config and metric_config.get('hidden_first_step', False):
+                                                    # Obtener el nombre del evento ancla (primer evento)
+                                                    anchor_event_name = None
+                                                    if 'events' in metric_config and metric_config['events']:
+                                                        first_event = metric_config['events'][0]
+                                                        anchor_event_name = first_event[0] if isinstance(first_event, tuple) else first_event
+                                                    
+                                                    if anchor_event_name:
+                                                        # Función auxiliar para normalizar nombres de eventos
+                                                        def normalize_event_name_for_filter_segment(name):
+                                                            """Normaliza el nombre del evento para comparación"""
+                                                            name = name.replace('[Amplitude]', '').strip()
+                                                            if name.startswith('ce:'):
+                                                                name = name[3:].strip()
+                                                                if name.startswith('('):
+                                                                    end_paren = name.find(')')
+                                                                    if end_paren != -1:
+                                                                        name = name[end_paren + 1:].strip()
+                                                            return name.lower().strip()
+                                                        
+                                                        # Filtrar filas que corresponden al stage del evento ancla
+                                                        normalized_anchor = normalize_event_name_for_filter_segment(anchor_event_name)
+                                                        df_segment_filtered = df_segment_filtered[
+                                                            df_segment_filtered['Funnel Stage'].apply(
+                                                                lambda stage: normalize_event_name_for_filter_segment(stage) != normalized_anchor
+                                                            )
+                                                        ]
+                                                
+                                                # Preparar variantes para este segmento usando el DataFrame filtrado
                                                 variants_segment = prepare_variants_from_dataframe(
-                                                    df_segment,
+                                                    df_segment_filtered,
                                                     initial_stage=initial_stage,
                                                     final_stage=final_stage
                                                 )
