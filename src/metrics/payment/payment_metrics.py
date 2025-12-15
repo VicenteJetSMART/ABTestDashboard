@@ -6,19 +6,19 @@ from src.utils.amplitude_filters import (
 # Next Step Rate Payment (Payment to Confirmation)
 NSR_PAYMENT = {'events': [
     ('payment_dom_loaded', []),
-    ('payment_confirmation_loaded', [])
+    ('revenue_amount', [])
 ]}
 
 # Next Step Rate Payment - DB
 NSR_PAYMENT_DB = {'events': [
     ('payment_dom_loaded', [get_DB_filter()]),
-    ('payment_confirmation_loaded', [get_DB_filter()])
+    ('revenue_amount', [get_DB_filter()])
 ]}
 
 # Website Conversion Rate from Payment - General
 WCR_PAYMENT = {'events': [
     ('payment_dom_loaded', []),
-    ('payment_confirmation_loaded', [])
+    ('revenue_amount', [])
 ]}
 
 # Website Conversion Rate from Payment - DB
@@ -59,7 +59,7 @@ TOGGLE_TAXES_RATE = {'events': [
 
 # Payment to Revenue (Final Conversion)
 PAYMENT_TO_REVENUE = {'events': [
-    ('payment_confirmation_loaded', []),
-    ('payment_confirmation_loaded', [])
+    ('payment_dom_loaded', []),
+    ('revenue_amount', [])
 ]}
 

@@ -221,13 +221,13 @@ def get_funnel_data_experiment(api_key, secret_key, start_date, end_date, experi
 		event_filters.extend(segmentation_filters)
 		
 		# PASO C: Construir filtros contextuales con "Inmunidad Contextual" para Ghost Anchors
-		# EXCEPCIÓN: payment_confirmation_loaded tiene propiedades rotas/vacías para flow_type y bundle_profile.
+		# EXCEPCIÓN: revenue_amount (y payment_confirmation_loaded) tienen propiedades rotas/vacías para flow_type y bundle_profile.
 		# - flow_type: Propiedad rota/vacía (siempre da 0 al filtrar)
 		# - bundle_profile: No tiene bundle_smart_count ni bundle_full_count (solo strings de nombres)
 		# El filtrado estricto en el inicio del funnel (Step 1) garantiza la integridad del cohorte.
 		
-		# Detectar si el evento actual es payment_confirmation_loaded (propiedades flow_type y bundle_profile rotas)
-		is_payment_confirmation = event_name and 'payment_confirmation_loaded' in str(event_name).lower()
+		# Detectar si el evento actual es revenue_amount o payment_confirmation_loaded (propiedades flow_type y bundle_profile rotas)
+		is_payment_confirmation = event_name and ('revenue_amount' in str(event_name).lower() or 'payment_confirmation_loaded' in str(event_name).lower())
 		
 		# ============================================================
 		# INMUNIDAD CONTEXTUAL: Regla de exclusión de filtros para Ghost Anchors
@@ -262,11 +262,11 @@ def get_funnel_data_experiment(api_key, secret_key, start_date, end_date, experi
 		
 		# Travel Group: Agregar según reglas de Inmunidad Contextual
 		# CRÍTICO: Verificar si debemos saltar contexto (para eventos intermedios ciegos como extra_selected)
-		# La única excepción es payment_confirmation_loaded que siempre acepta pax counts.
+		# La única excepción es revenue_amount (y payment_confirmation_loaded) que siempre acepta pax counts.
 		if travel_group and str(travel_group).upper() != "ALL":
-			# Aplicar filtro SI: (No estamos en modo skip) O (Es el evento de pago)
+			# Aplicar filtro SI: (No estamos en modo skip) O (Es el evento de pago/revenue)
 			if not should_skip_context or is_payment_confirmation:
-				travel_group_filters = get_travel_group_filter(travel_group)
+				travel_group_filters = get_travel_group_filter(travel_group, event_name)
 				if travel_group_filters:
 					event_filters.extend(travel_group_filters)
 		# Pax Adult Count: Agregar SIEMPRE si travel_group no está disponible (compatibilidad hacia atrás)

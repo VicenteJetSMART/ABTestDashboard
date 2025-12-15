@@ -18,7 +18,7 @@ NSR_FLIGHT_DB = {'events': [
 # Website Conversion Rate from Flight - General
 WCR_FLIGHT = {'events': [
     ('flight_dom_loaded_flight', []),
-    ('payment_confirmation_loaded', [])
+    ('revenue_amount', [])
 ]}
 
 # Website Conversion Rate from Flight - DB
@@ -76,18 +76,18 @@ ADD_TO_CART_DISCOUNT_CLUB = {'events': [
 # CR Outbound Flight
 CR_OUTBOUND_FLIGHT = {'events': [
     ('outbound_flight_selected_flight', []),
-    ('payment_confirmation_loaded', [])
+    ('revenue_amount', [])
 ]}
 
 # CR Inbound Flight
 CR_INBOUND_FLIGHT = {'events': [
     ('inbound_flight_selected_flight', []),
-    ('payment_confirmation_loaded', [])
+    ('revenue_amount', [])
 ]}
 
 # CR Discount Club
 CR_DISCOUNT_CLUB = {'events': [
     ('dc_modal_dom_loaded', []),
-    ('payment_confirmation_loaded', [])
+    ('revenue_amount', [])
 ]}
 

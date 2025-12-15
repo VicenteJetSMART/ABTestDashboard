@@ -19,17 +19,30 @@ from src.utils.experiment_utils import (
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 
-# ---------------------------------------------------------
-# CONFIGURACIÓN DE PARCHES TEMPORALES (GHOST ANCHORS)
-# Propósito: Usar un evento previo (_loaded) para filtrar contexto (Familia, Vuela Ligero)
-# en métricas que inician con eventos ciegos (_selected).
-# TO REVERT: Simplemente elimina la métrica de esta lista cuando los eventos selected tengan propiedades.
-# ---------------------------------------------------------
-GHOST_ANCHOR_CONFIG = {
-    'Cr Flexi': 'extras_dom_loaded',  # Métrica: Evento Ancla a inyectar
-    'Cr Cabin Bag': 'baggage_dom_loaded',  # Ejemplo si aplica
-    'Cr Checked Bag': 'baggage_dom_loaded',  # Ejemplo si aplica
-    # Agrega aquí cualquier otra métrica que empiece con _selected
+# ==============================================================================
+# MAPEO DE GHOST ANCHORS (Configuración Explícita)
+# Define qué evento de contexto (_loaded) se inyecta según el evento inicial.
+# Key: Evento Inicial de la métrica (Hijo)
+# Value: Evento Ancla a inyectar (Padre/Contexto)
+# ==============================================================================
+EVENT_ANCHOR_MAP = {
+    # Extras (Flexi, Checkin, Embarque, etc.)
+    'extra_selected': 'extras_dom_loaded',  # CORREGIDO: Plural 'extras'
+
+    # Maletas / Ancillaries (Modal o Selección directa)
+    'modal_ancillary_clicked': 'baggage_dom_loaded',
+    'baggage_selected': 'baggage_dom_loaded',
+    'cabin_bag_selected': 'baggage_dom_loaded',
+    'checked_bag_selected': 'baggage_dom_loaded',
+
+    # Vuelos (Selección de itinerario)
+    'dc_modal_dom_loaded': 'flight_dom_loaded_flight',
+    'inbound_flight_selected_flight': 'flight_dom_loaded_flight',
+    'outbound_flight_selected_flight': 'flight_dom_loaded_flight',
+
+    # Asientos (Selección en mapa)
+    'inbound_seat_selected': 'seatmap_dom_loaded',
+    'outbound_seat_selected': 'seatmap_dom_loaded'
 }
 
 # Lista completa de eventos disponibles en Amplitude
@@ -501,7 +514,7 @@ def run_ui():
                     with col7:
                         travel_group_quick = st.selectbox(
                             "👥 Grupo de Viaje",
-                            options=["ALL", "Viajero Solo", "Pareja", "Grupo", "Familia (con Niño)", "Familia (con Infante)"],
+                            options=["ALL", "Viajero Solo", "Pareja", "Grupo", "Familia (con Menores)"],
                             index=0,
                             key="travel_group_quick",
                             help="Tipo de grupo de viaje (ALL = todos los grupos)"
@@ -527,39 +540,33 @@ def run_ui():
                         PREDEFINED_METRICS_QUICK = get_all_metrics_flat(metrics_by_category)
                         
                         # ---------------------------------------------------------
-                        # INYECCIÓN DINÁMICA DE GHOST ANCHORS
-                        # Modificar métricas que requieren evento ancla invisible
+                        # APLICAR GHOST ANCHORS BASADO EN MAPEO EXPLÍCITO
+                        # Modificar métricas dinámicamente según el primer evento
                         # ---------------------------------------------------------
-                        for metric_name, anchor_event in GHOST_ANCHOR_CONFIG.items():
-                            if metric_name in PREDEFINED_METRICS_QUICK:
-                                metric_config = PREDEFINED_METRICS_QUICK[metric_name]
+                        for metric_name, metric_def in PREDEFINED_METRICS_QUICK.items():
+                            # Validar que la métrica tenga eventos definidos
+                            if isinstance(metric_def, dict) and 'events' in metric_def:
+                                events_list = metric_def.get('events', [])
                                 
-                                # Verificar que la métrica tenga la estructura esperada
-                                if isinstance(metric_config, dict) and 'events' in metric_config:
-                                    events_list = metric_config['events']
+                                if len(events_list) > 0:
+                                    # Extraer el nombre del primer evento
+                                    first_event = events_list[0]
+                                    first_event_name = first_event[0] if isinstance(first_event, tuple) else first_event
                                     
-                                    # Verificar que el primer evento no sea ya el evento ancla
-                                    if events_list:
-                                        first_event = events_list[0]
-                                        first_event_name = first_event[0] if isinstance(first_event, tuple) else first_event
+                                    # Verificar si el primer evento necesita un ancla
+                                    if first_event_name in EVENT_ANCHOR_MAP:
+                                        anchor_event = EVENT_ANCHOR_MAP[first_event_name]
                                         
-                                        # Solo inyectar si el primer evento no es el ancla
+                                        # Verificar que el primer evento no sea ya el evento ancla
                                         if first_event_name != anchor_event:
-                                            # Crear una copia de la configuración para no modificar la original
-                                            modified_config = metric_config.copy()
-                                            modified_events = events_list.copy()
-                                            
-                                            # Insertar el evento ancla al inicio de la lista
+                                            # 1. Inyectar el ancla al principio de la lista de eventos
                                             anchor_tuple = (anchor_event, [])
-                                            modified_events.insert(0, anchor_tuple)
+                                            events_list.insert(0, anchor_tuple)
                                             
-                                            modified_config['events'] = modified_events
+                                            # 2. Activar modo oculto (para ignorar este paso en el gráfico final)
+                                            metric_def['hidden_first_step'] = True
                                             
-                                            # Activar bandera hidden_first_step
-                                            modified_config['hidden_first_step'] = True
-                                            
-                                            # Actualizar la métrica en el diccionario
-                                            PREDEFINED_METRICS_QUICK[metric_name] = modified_config
+                                            # print(f"🔧 Ghost Anchor: {metric_name} ahora inicia con {anchor_event}")
                         
                         # Mostrar información de métricas disponibles
                         if PREDEFINED_METRICS_QUICK:
@@ -1167,10 +1174,10 @@ def run_ui():
                                     event_names_for_stages = event_names
                                 
                                 # Usar el orden de eventos de la métrica
-                                # Para WCR: conversión = payment_confirmation_loaded / baggage_dom_loaded
+                                # Para WCR: conversión = revenue_amount / baggage_dom_loaded
                                 # En prepare_variants_from_dataframe:
                                 #   - initial_stage → n (denominador) = baggage_dom_loaded
-                                #   - final_stage → x (numerador) = payment_confirmation_loaded
+                                #   - final_stage → x (numerador) = revenue_amount
                                 # Conversión = x/n = final_stage / initial_stage
                                 
                                 # Función auxiliar para normalizar nombres de eventos
@@ -1206,7 +1213,7 @@ def run_ui():
                                     # Si tiene guiones bajos, tomar la primera parte (más significativa)
                                     if '_' in name:
                                         parts = name.split('_')
-                                        # Para payment_confirmation_loaded, tomar 'payment'
+                                        # Para revenue_amount, tomar 'revenue'
                                         # Para baggage_dom_loaded, tomar 'baggage'
                                         return parts[0] if len(parts) > 0 else name
                                     # Si no tiene guiones bajos, devolver el nombre completo
@@ -1521,7 +1528,7 @@ def run_ui():
                                 'Flow Type': ['DB', 'PB', 'CK'],  # Valores exactos de los selectores (sin 'ALL')
                                 'Trip Type': ['Solo Ida (One Way)', 'Ida y Vuelta (Round Trip)'],  # Valores exactos de los selectores (sin 'ALL')
                                 'Flight Profile': ['Vuela Ligero', 'Smart', 'Full', 'Smart + Full'],  # Valores exactos de los selectores (sin 'ALL')
-                                'Travel Group': ['Viajero Solo', 'Pareja', 'Grupo', 'Familia (con Niño)', 'Familia (con Infante)']  # Valores exactos de los selectores (sin 'ALL')
+                                'Travel Group': ['Viajero Solo', 'Pareja', 'Grupo', 'Familia (con Menores)']  # Valores exactos de los selectores (sin 'ALL')
                             }
                             
                             # Mapeo de desglose a parámetro de la función
@@ -1996,7 +2003,7 @@ def run_ui():
         # Website Conversion Rate from [Step] - General (sin filtros adicionales)
         WCR_[STEP] = {'events': [
             ('evento_inicial', []),
-            ('payment_confirmation_loaded', [])
+            ('revenue_amount', [])
         ]}
 
         # [Step] A2C con filtros específicos aplicados a ambos eventos

@@ -18,7 +18,7 @@ NSR_PASSENGERS_DB = {'events': [
 # Website Conversion Rate from Passengers - General
 WCR_PASSENGERS = {'events': [
     ('passengers_dom_loaded', []),
-    ('payment_confirmation_loaded', [])
+    ('revenue_amount', [])
 ]}
 
 # Website Conversion Rate from Passengers - DB

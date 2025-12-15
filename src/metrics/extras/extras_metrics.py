@@ -18,7 +18,7 @@ NSR_EXTRAS_DB = {'events': [
 # Website Conversion Rate from Extras - General
 WCR_EXTRAS = {'events': [
     ('extras_dom_loaded', []),
-    ('payment_confirmation_loaded', [])
+    ('revenue_amount', [])
 ]}
 
 # Website Conversion Rate from Extras - DB
@@ -113,7 +113,7 @@ ADD_TO_CART_INSURANCE = {'events': [
 # CR Extras General
 CR_EXTRAS_GENERAL = {'events': [
     ('extra_selected', []),
-    ('payment_confirmation_loaded', [])
+    ('revenue_amount', [])
 ]}
 
 # CR Flexi (El filtro va en el PRIMER evento)
@@ -124,7 +124,7 @@ CR_FLEXI = {'events': [
         'subprop_op': 'is',
         'subprop_value': ['flexiFee']
     }]),
-    ('payment_confirmation_loaded', [])
+    ('revenue_amount', [])
 ]}
 
 # CR Airport Checkin (El filtro va en el PRIMER evento)
@@ -135,7 +135,7 @@ CR_AIRPORT_CHECKIN = {'events': [
         'subprop_op': 'is',
         'subprop_value': ['airportCheckin']
     }]),
-    ('payment_confirmation_loaded', [])
+    ('revenue_amount', [])
 ]}
 
 # CR Priority Boarding (El filtro va en el PRIMER evento)
@@ -146,7 +146,7 @@ CR_PRIORITY_BOARDING = {'events': [
         'subprop_op': 'is',
         'subprop_value': ['priorityBoarding']
     }]),
-    ('payment_confirmation_loaded', [])
+    ('revenue_amount', [])
 ]}
 
 # CR Pet (El filtro va en el PRIMER evento)
@@ -157,7 +157,7 @@ CR_PET = {'events': [
         'subprop_op': 'is',
         'subprop_value': ['pet']
     }]),
-    ('payment_confirmation_loaded', [])
+    ('revenue_amount', [])
 ]}
 
 # CR Insurance (El filtro va en el PRIMER evento)
@@ -168,6 +168,6 @@ CR_INSURANCE = {'events': [
         'subprop_op': 'is',
         'subprop_value': ['insurance']
     }]),
-    ('payment_confirmation_loaded', [])
+    ('revenue_amount', [])
 ]}
 
