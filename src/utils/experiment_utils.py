@@ -220,62 +220,55 @@ def get_funnel_data_experiment(api_key, secret_key, start_date, end_date, experi
 		# Estos filtros garantizan que el cohorte sea consistente en todo el funnel
 		event_filters.extend(segmentation_filters)
 		
-		# PASO C: Construir filtros contextuales con "Inmunidad Contextual" para Ghost Anchors
-		# EXCEPCIÓN: revenue_amount (y payment_confirmation_loaded) tienen propiedades rotas/vacías para flow_type y bundle_profile.
-		# - flow_type: Propiedad rota/vacía (siempre da 0 al filtrar)
-		# - bundle_profile: No tiene bundle_smart_count ni bundle_full_count (solo strings de nombres)
-		# El filtrado estricto en el inicio del funnel (Step 1) garantiza la integridad del cohorte.
-		
-		# Detectar si el evento actual es revenue_amount o payment_confirmation_loaded (propiedades flow_type y bundle_profile rotas)
-		is_payment_confirmation = event_name and ('revenue_amount' in str(event_name).lower() or 'payment_confirmation_loaded' in str(event_name).lower())
+		# PASO C: Construir filtros contextuales con "Filtrado Estricto de Primer Paso"
+		# POLÍTICA: Los filtros de contexto de negocio se aplican EXCLUSIVAMENTE al primer evento (índice 0).
+		# Esto evita errores HTTP 400 y resultados vacíos en eventos intermedios o finales que no tienen
+		# las propiedades exactas. Confiamos 100% en la integridad del funnel: si el usuario calificó
+		# en el paso 1, cuenta para el resto.
 		
 		# ============================================================
-		# INMUNIDAD CONTEXTUAL: Regla de exclusión de filtros para Ghost Anchors
+		# FILTRADO ESTRICTO DE PRIMER PASO (Strict Anchor Logic)
 		# ============================================================
-		# Si hay un Ghost Anchor activo (hidden_first_step == True):
-		# - Paso 0 (Ancla): APLICAR TODOS los filtros (Strict Mode) - aquí filtramos el cohorte
-		# - Pasos Intermedios (idx > 0): SKIP filtros Flow/Trip/Bundle (confiamos en el filtro del Paso 0)
-		# - Paso Final (payment_confirmation_loaded): Mantener lógica especial existente
+		# Solo el evento ancla (índice 0) lleva la carga de segmentación de negocio.
+		# Esto evita errores 400 en eventos intermedios (selected) o finales (revenue)
+		# que podrían no tener las propiedades exactas.
 		# ============================================================
-		should_skip_context = False
-		if hidden_first_step and idx > 0:
-			# Si tenemos un ancla fantasma activa y NO es el primer evento (el ancla), relajamos los filtros
-			should_skip_context = True
+		is_strict_anchor = (idx == 0)
 		
-		# Flow Type: Agregar según reglas de Inmunidad Contextual
-		if flow_type and str(flow_type).upper() != "ALL" and not has_explicit_flow_type_filter and not is_payment_confirmation and not should_skip_context:
-			flow_type_filter = get_flow_type_filter(flow_type)
-			if flow_type_filter:
-				event_filters.append(flow_type_filter)
-		
-		# Trip Type: Agregar según reglas de Inmunidad Contextual
-		if trip_type and str(trip_type).upper() != "ALL" and not has_explicit_trip_type_filter and not should_skip_context:
-			trip_type_filter = get_trip_type_filter(trip_type)
-			if trip_type_filter:
-				event_filters.append(trip_type_filter)
-		
-		# Bundle Profile: Agregar según reglas de Inmunidad Contextual
-		if bundle_profile and str(bundle_profile).upper() != "ALL" and not has_explicit_bundle_filter and not is_payment_confirmation and not should_skip_context:
-			bundle_filters = get_bundle_filters(bundle_profile)
-			if bundle_filters:
-				event_filters.extend(bundle_filters)
-		
-		# Travel Group: Agregar según reglas de Inmunidad Contextual
-		# CRÍTICO: Verificar si debemos saltar contexto (para eventos intermedios ciegos como extra_selected)
-		# La única excepción es revenue_amount (y payment_confirmation_loaded) que siempre acepta pax counts.
+		# 1. TRAVEL GROUP: Solo aplicar en el primer paso
 		if travel_group and str(travel_group).upper() != "ALL":
-			# Aplicar filtro SI: (No estamos en modo skip) O (Es el evento de pago/revenue)
-			if not should_skip_context or is_payment_confirmation:
+			if is_strict_anchor:
 				travel_group_filters = get_travel_group_filter(travel_group, event_name)
 				if travel_group_filters:
 					event_filters.extend(travel_group_filters)
-		# Pax Adult Count: Agregar SIEMPRE si travel_group no está disponible (compatibilidad hacia atrás)
-		# También protegido por should_skip_context
+		
+		# 2. PAX ADULT COUNT: Solo aplicar en el primer paso (compatibilidad hacia atrás)
 		elif pax_adult_count and str(pax_adult_count).upper() != "ALL" and not has_explicit_pax_filter:
-			if not should_skip_context or is_payment_confirmation:
+			if is_strict_anchor:
 				pax_adult_count_filter = get_pax_adult_count_filter(pax_adult_count)
 				if pax_adult_count_filter:
 					event_filters.append(pax_adult_count_filter)
+		
+		# 3. TRIP TYPE: Solo aplicar en el primer paso
+		if trip_type and str(trip_type).upper() != "ALL" and not has_explicit_trip_type_filter:
+			if is_strict_anchor:
+				trip_type_filter = get_trip_type_filter(trip_type)
+				if trip_type_filter:
+					event_filters.append(trip_type_filter)
+		
+		# 4. FLOW TYPE: Solo aplicar en el primer paso
+		if flow_type and str(flow_type).upper() != "ALL" and not has_explicit_flow_type_filter:
+			if is_strict_anchor:
+				flow_type_filter = get_flow_type_filter(flow_type)
+				if flow_type_filter:
+					event_filters.append(flow_type_filter)
+		
+		# 5. BUNDLE PROFILE: Solo aplicar en el primer paso
+		if bundle_profile and str(bundle_profile).upper() != "ALL" and not has_explicit_bundle_filter:
+			if is_strict_anchor:
+				bundle_filters = get_bundle_filters(bundle_profile)
+				if bundle_filters:
+					event_filters.extend(bundle_filters)
 		
 		# PASO D: Agregar filtros específicos de la métrica si existen para este evento
 		# Estos filtros se agregan DESPUÉS de los globales, permitiendo que la métrica

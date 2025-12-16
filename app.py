@@ -320,11 +320,303 @@ def run_ui():
 
         st.divider()
 
+        # ============================================================
+        # SECCIÓN DE CONFIGURACIÓN DE ANÁLISIS
+        # ============================================================
+        st.subheader("🔍 Configuración de Análisis")
+        
+        # Cargar experimentos para la sidebar
+        with st.spinner("Cargando experimentos..."):
+            try:
+                df_exp_sidebar = get_experiments_list()
+                
+                columns_to_show = ['name', 'key', 'state', 'startDate', 'endDate', 'createdAt', 'variants']
+                available_columns = [col for col in columns_to_show if col in df_exp_sidebar.columns]
+                df_exp_filtered_sidebar = df_exp_sidebar[available_columns].copy()
+                
+                date_columns = ['startDate', 'endDate', 'createdAt']
+                for col in date_columns:
+                    if col in df_exp_filtered_sidebar.columns:
+                        df_exp_filtered_sidebar[col] = pd.to_datetime(df_exp_filtered_sidebar[col], errors='coerce')
+                        df_exp_filtered_sidebar[col] = df_exp_filtered_sidebar[col].dt.strftime('%Y-%m-%d')
+                
+                # Procesar columna variants
+                if 'variants' in df_exp_filtered_sidebar.columns:
+                    def process_variants(variant_obj):
+                        if variant_obj is None:
+                            return "N/A"
+                        try:
+                            if isinstance(variant_obj, float) and pd.isna(variant_obj):
+                                return "N/A"
+                            if isinstance(variant_obj, list):
+                                if not variant_obj:
+                                    return "N/A"
+                                names = []
+                                for v in variant_obj:
+                                    if isinstance(v, dict):
+                                        names.append(v.get('name', v.get('key', str(v))))
+                                    else:
+                                        names.append(str(v))
+                                return ", ".join(names)
+                            elif isinstance(variant_obj, dict):
+                                return variant_obj.get('name', variant_obj.get('key', str(variant_obj)))
+                            return str(variant_obj)
+                        except Exception:
+                            return str(variant_obj)
+                    
+                    df_exp_filtered_sidebar['variants'] = df_exp_filtered_sidebar['variants'].apply(process_variants)
+                
+                # Selector de experimento
+                if len(df_exp_filtered_sidebar) > 0:
+                    experiment_options_sidebar = []
+                    for idx, row in df_exp_filtered_sidebar.iterrows():
+                        exp_name = row.get('name', f"Experiment {idx}")
+                        exp_key = row.get('key', '')
+                        exp_state = row.get('state', '')
+                        display_name = f"{exp_name} ({exp_key}) - {exp_state}"
+                        experiment_options_sidebar.append((display_name, idx))
+                    
+                    selected_exp_display_sidebar = st.selectbox(
+                        "📊 Selecciona un experimento:",
+                        options=[opt[0] for opt in experiment_options_sidebar],
+                        help="Elige un experimento de la lista para configurar su análisis",
+                        key="selected_exp_sidebar"
+                    )
+                    
+                    # Obtener el índice del experimento seleccionado
+                    try:
+                        selected_exp_idx_sidebar = next(opt[1] for opt in experiment_options_sidebar if opt[0] == selected_exp_display_sidebar)
+                        selected_row_sidebar = df_exp_filtered_sidebar.iloc[selected_exp_idx_sidebar]
+                        selected_row_original_sidebar = df_exp_sidebar.iloc[selected_exp_idx_sidebar]
+                    except StopIteration:
+                        selected_exp_idx_sidebar = experiment_options_sidebar[0][1]
+                        selected_row_sidebar = df_exp_filtered_sidebar.iloc[selected_exp_idx_sidebar]
+                        selected_row_original_sidebar = df_exp_sidebar.iloc[selected_exp_idx_sidebar]
+                    
+                    # Detalles del experimento (versión compacta en sidebar)
+                    with st.expander("📋 Detalles del Experimento", expanded=False):
+                        st.write(f"**Nombre:** {selected_row_sidebar.get('name', 'N/A')}")
+                        st.write(f"**Key:** {selected_row_sidebar.get('key', 'N/A')}")
+                        st.write(f"**Estado:** {selected_row_sidebar.get('state', 'N/A')}")
+                        st.write(f"**Fecha Inicio:** {selected_row_sidebar.get('startDate', 'N/A')}")
+                        end_date_display = selected_row_sidebar.get('endDate', 'N/A')
+                        if pd.isna(end_date_display) or end_date_display in ['None', 'nan', '']:
+                            end_date_display = f"{pd.Timestamp.now().strftime('%Y-%m-%d')} (Hoy)"
+                        st.write(f"**Fecha Fin:** {end_date_display}")
+                        st.write(f"**Variantes:** {selected_row_sidebar.get('variants', 'N/A')}")
+                    
+                    # Guardar en session_state inmediatamente
+                    st.session_state['selected_row_sidebar'] = selected_row_sidebar
+                    st.session_state['selected_row_original_sidebar'] = selected_row_original_sidebar
+                    
+                    st.divider()
+                    
+                    # Filtros de análisis
+                    with st.expander("⚙️ Filtros Avanzados", expanded=False):
+                        device_quick = st.selectbox(
+                            "📱 Device",
+                            options=["ALL", "desktop", "mobile"],
+                            index=0,
+                            key="device_quick",
+                            help="Tipo de dispositivo a analizar"
+                        )
+                        culture_quick = st.selectbox(
+                            "🌍 Culture",
+                            options=["ALL", "CL", "AR", "PE", "CO", "BR", "UY", "PY", "EC", "US", "DO"],
+                            index=0,
+                            key="culture_quick",
+                            help="Cultura/país a analizar"
+                        )
+                        flow_type_quick = st.selectbox(
+                            "🔄 Tipo de Flujo",
+                            options=["ALL", "DB", "PB", "CK"],
+                            index=0,
+                            key="flow_type_quick",
+                            help="Tipo de flujo a analizar"
+                        )
+                        bundle_profile_quick = st.selectbox(
+                            "✈️ Perfil de Vuelo",
+                            options=["ALL", "Vuela Ligero", "Smart", "Full", "Smart + Full"],
+                            index=0,
+                            key="bundle_profile_quick",
+                            help="Perfil de bundle del usuario"
+                        )
+                        trip_type_quick = st.selectbox(
+                            "✈️ Tipo de Viaje",
+                            options=["ALL", "Solo Ida (One Way)", "Ida y Vuelta (Round Trip)"],
+                            index=0,
+                            key="trip_type_quick",
+                            help="Tipo de viaje a analizar"
+                        )
+                        travel_group_quick = st.selectbox(
+                            "👥 Grupo de Viaje",
+                            options=["ALL", "Viajero Solo", "Pareja", "Grupo", "Familia (con Menores)"],
+                            index=0,
+                            key="travel_group_quick",
+                            help="Tipo de grupo de viaje"
+                        )
+                        # Mapeo de Ventana de Conversión a Segundos (Amplitude requiere int)
+                        conversion_window_options_quick = {
+                            "5 minutos": 300,
+                            "15 minutos": 900,
+                            "30 minutos": 1800,
+                            "1 hora": 3600,
+                            "1 día": 86400
+                        }
+                        conversion_window_label_quick = st.selectbox(
+                            "⏱️ Ventana de Conversión",
+                            options=list(conversion_window_options_quick.keys()),
+                            index=2,
+                            key="conversion_window_quick",  # El widget guarda el string en session_state
+                            help="Tiempo máximo para considerar una conversión válida"
+                        )
+                        # Convertir el string seleccionado a segundos (entero) y guardar en session_state
+                        conversion_window_seconds = conversion_window_options_quick.get(conversion_window_label_quick, 1800)
+                        st.session_state['conversion_window_seconds'] = conversion_window_seconds  # Guardar el entero
+                    
+                    st.divider()
+                    
+                    # Cargar métricas
+                    PREDEFINED_METRICS_QUICK = {}
+                    try:
+                        from src.utils.metrics_loader import (
+                            load_all_metrics,
+                            get_all_metrics_flat,
+                            get_metrics_info
+                        )
+                        
+                        metrics_by_category = load_all_metrics()
+                        PREDEFINED_METRICS_QUICK = get_all_metrics_flat(metrics_by_category)
+                        
+                        # Aplicar Ghost Anchors
+                        for metric_name, metric_def in PREDEFINED_METRICS_QUICK.items():
+                            if isinstance(metric_def, dict) and 'events' in metric_def:
+                                events_list = metric_def.get('events', [])
+                                if len(events_list) > 0:
+                                    first_event = events_list[0]
+                                    first_event_name = first_event[0] if isinstance(first_event, tuple) else first_event
+                                    if first_event_name in EVENT_ANCHOR_MAP:
+                                        anchor_event = EVENT_ANCHOR_MAP[first_event_name]
+                                        if first_event_name != anchor_event:
+                                            anchor_tuple = (anchor_event, [])
+                                            events_list.insert(0, anchor_tuple)
+                                            metric_def['hidden_first_step'] = True
+                    except Exception as e:
+                        st.warning(f"⚠️ Error cargando métricas: {e}")
+                    
+                    # Selectores de métricas y eventos
+                    st.markdown("#### 📊 Métricas y Eventos")
+                    if PREDEFINED_METRICS_QUICK:
+                        selected_metrics_quick = st.multiselect(
+                            "Métricas Predefinidas:",
+                            options=list(PREDEFINED_METRICS_QUICK.keys()),
+                            default=[],
+                            key="metrics_quick_sidebar",
+                            help="Métricas completas predefinidas"
+                        )
+                    else:
+                        selected_metrics_quick = []
+                    
+                    selected_events_raw_quick = st.multiselect(
+                        "Eventos Individuales:",
+                        options=AVAILABLE_EVENTS,
+                        default=["homepage_dom_loaded"],
+                        key="events_raw_quick_sidebar",
+                        help="Eventos individuales"
+                    )
+                    
+                    # Procesar métricas seleccionadas
+                    metrics_to_process_sidebar = []
+                    if selected_metrics_quick or selected_events_raw_quick:
+                        # Procesar métricas predefinidas
+                        for metric_name in selected_metrics_quick:
+                            if metric_name in PREDEFINED_METRICS_QUICK:
+                                metric_config = PREDEFINED_METRICS_QUICK[metric_name]
+                                metric_events = []
+                                metric_filters_map = {}
+                                
+                                if isinstance(metric_config, dict) and 'events' in metric_config:
+                                    events_list = metric_config['events']
+                                    if events_list:
+                                        first_item = events_list[0]
+                                        
+                                        if isinstance(first_item, tuple) and len(first_item) >= 2:
+                                            for event_tuple in events_list:
+                                                if isinstance(event_tuple, tuple) and len(event_tuple) >= 2:
+                                                    event_name = event_tuple[0]
+                                                    event_filters = event_tuple[1] if isinstance(event_tuple[1], list) else []
+                                                    metric_events.append(event_name)
+                                                    if event_filters:
+                                                        metric_filters_map[event_name] = event_filters
+                                        elif isinstance(first_item, tuple) and len(first_item) == 1:
+                                            for event_tuple in events_list:
+                                                if isinstance(event_tuple, tuple) and len(event_tuple) > 0:
+                                                    metric_events.append(event_tuple[0])
+                                        elif isinstance(first_item, str):
+                                            metric_events = events_list
+                                            metric_filters = metric_config.get('filters', [])
+                                            if metric_filters:
+                                                filters_list = metric_filters if isinstance(metric_filters, list) else [metric_filters]
+                                                for event in metric_events:
+                                                    metric_filters_map[event] = filters_list.copy()
+                                
+                                elif isinstance(metric_config, list):
+                                    metric_events = metric_config
+                                
+                                if metric_events:
+                                    hidden_first_step = False
+                                    if isinstance(metric_config, dict):
+                                        hidden_first_step = metric_config.get('hidden_first_step', False)
+                                    
+                                    metrics_to_process_sidebar.append({
+                                        'name': metric_name,
+                                        'events': metric_events,
+                                        'filters': metric_filters_map,
+                                        'hidden_first_step': hidden_first_step
+                                    })
+                        
+                        # Agregar eventos individuales
+                        if selected_events_raw_quick:
+                            metrics_to_process_sidebar.append({
+                                'name': 'Eventos Individuales',
+                                'events': selected_events_raw_quick,
+                                'filters': {}
+                            })
+                    
+                    # Guardar métricas procesadas y datos del experimento en session_state para usar en el área principal
+                    # NOTA: No guardamos device_quick, culture_quick, etc. aquí porque los widgets ya manejan su propio estado
+                    st.session_state['metrics_to_process_sidebar'] = metrics_to_process_sidebar
+                    st.session_state['PREDEFINED_METRICS_QUICK'] = PREDEFINED_METRICS_QUICK
+                    st.session_state['selected_row_sidebar'] = selected_row_sidebar
+                    st.session_state['selected_row_original_sidebar'] = selected_row_original_sidebar
+                    # use_cumulative se guarda porque no tiene widget con key en la sidebar actual
+                    st.session_state['use_cumulative'] = use_cumulative
+                    
+                else:
+                    st.warning("No hay experimentos disponibles")
+                    selected_exp_idx_sidebar = None
+                    selected_row_sidebar = None
+                    selected_row_original_sidebar = None
+                    btn_run_quick = False
+                    selected_metrics_quick = []
+                    selected_events_raw_quick = []
+                    
+            except Exception as e:
+                st.error(f"❌ Error cargando experimentos: {e}")
+                selected_exp_idx_sidebar = None
+                selected_row_sidebar = None
+                selected_row_original_sidebar = None
+                btn_run_quick = False
+                selected_metrics_quick = []
+                selected_events_raw_quick = []
+        
+        st.divider()
+        
         st.subheader("ℹ️ Información")
         st.info("""
         **AB Test Dashboard**
         Herramienta para analizar experimentos de Amplitude con datos de Jetsmart.
-        Configura los parámetros en la sección principal y ejecuta el análisis.
+        Configura los parámetros arriba y ejecuta el análisis.
         """)
 
     # Tabs principales
@@ -392,357 +684,99 @@ def run_ui():
 
                 st.dataframe(df_exp_filtered, use_container_width=True)
 
-                # Selección de experimento para análisis
-                st.markdown("### 🚀 Análisis de Experimento")
-                st.caption("Selecciona un experimento de la tabla para configurar y ejecutar su análisis")
-                
-                # Crear lista de experimentos para seleccionar
-                if len(df_exp_filtered) > 0:
-                    # Crear opciones para el selectbox
-                    experiment_options = []
-                    for idx, row in df_exp_filtered.iterrows():
-                        exp_name = row.get('name', f"Experiment {idx}")
-                        exp_key = row.get('key', '')
-                        exp_state = row.get('state', '')
-                        display_name = f"{exp_name} ({exp_key}) - {exp_state}"
-                        experiment_options.append((display_name, idx))
-                    
-                    selected_exp_display = st.selectbox(
-                        "Selecciona un experimento:",
-                        options=[opt[0] for opt in experiment_options],
-                        help="Elige un experimento de la lista para configurar su análisis",
-                        key="selected_exp"
-                    )
-                    
-                    # Obtener el índice del experimento seleccionado
-                    try:
-                        selected_exp_idx = next(opt[1] for opt in experiment_options if opt[0] == selected_exp_display)
-                        selected_row = df_exp_filtered.iloc[selected_exp_idx]
-                        # Obtener la fila original con fechas completas para procesamiento
-                        selected_row_original = df_exp.iloc[selected_exp_idx]
-                    except StopIteration:
-                        # Si no se encuentra el experimento, usar el primero como default
-                        selected_exp_idx = experiment_options[0][1]
-                        selected_row = df_exp_filtered.iloc[selected_exp_idx]
-                        selected_row_original = df_exp.iloc[selected_exp_idx]
+                # Mostrar información de métricas disponibles y botón de ejecutar si hay experimento seleccionado
+                if st.session_state.get('selected_row_sidebar') is not None:
+                    selected_row_sidebar = st.session_state['selected_row_sidebar']
+                    PREDEFINED_METRICS_QUICK = st.session_state.get('PREDEFINED_METRICS_QUICK', {})
+                    metrics_to_process_sidebar = st.session_state.get('metrics_to_process_sidebar', [])
                     
                     # Mostrar detalles del experimento seleccionado
-                    with st.expander("📋 Detalles del Experimento Seleccionado"):
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            st.write(f"**Nombre:** {selected_row.get('name', 'N/A')}")
-                            st.write(f"**Key:** {selected_row.get('key', 'N/A')}")
-                            st.write(f"**Estado:** {selected_row.get('state', 'N/A')}")
-                        with col2:
-                            st.write(f"**Fecha Inicio:** {selected_row.get('startDate', 'N/A')}")
-                            
-                            # Mostrar fecha fin o fecha de hoy si está corriendo
-                            end_date_display = selected_row.get('endDate', 'N/A')
-                            if pd.isna(end_date_display) or end_date_display in ['None', 'nan', '']:
-                                end_date_display = f"{pd.Timestamp.now().strftime('%Y-%m-%d')} (Hoy - experimento corriendo)"
-                            st.write(f"**Fecha Fin:** {end_date_display}")
-                            
-                            st.write(f"**Variantes:** {selected_row.get('variants', 'N/A')}")
-                    
-                    # Configuración rápida para el análisis
-                    st.markdown("### ⚙️ Configuración del Análisis")
-                    
-                    # Primera fila: Device, Culture, Flow Type
-                    col1, col2, col3 = st.columns(3)
+                    st.markdown("### 📋 Experimento Seleccionado")
+                    col1, col2 = st.columns(2)
                     with col1:
-                        device_quick = st.selectbox(
-                            "📱 Device",
-                            options=["ALL", "desktop", "mobile"],
-                            index=0,
-                            key="device_quick",
-                            help="Tipo de dispositivo a analizar (ALL = todos los dispositivos)"
-                        )
+                        st.write(f"**Nombre:** {selected_row_sidebar.get('name', 'N/A')}")
+                        st.write(f"**Key:** {selected_row_sidebar.get('key', 'N/A')}")
+                        st.write(f"**Estado:** {selected_row_sidebar.get('state', 'N/A')}")
                     with col2:
-                        culture_quick = st.selectbox(
-                            "🌍 Culture",
-                            options=["ALL", "CL", "AR", "PE", "CO", "BR", "UY", "PY", "EC", "US", "DO"],
-                            index=0,
-                            key="culture_quick",
-                            help="Cultura/país a analizar (ALL = todos los países)"
-                        )
-                    with col3:
-                        flow_type_quick = st.selectbox(
-                            "🔄 Tipo de Flujo",
-                            options=["ALL", "DB", "PB", "CK"],
-                            index=0,
-                            key="flow_type_quick",
-                            help="Tipo de flujo a analizar (ALL = todos los tipos de flujo)"
-                        )
+                        st.write(f"**Fecha Inicio:** {selected_row_sidebar.get('startDate', 'N/A')}")
+                        end_date_display = selected_row_sidebar.get('endDate', 'N/A')
+                        if pd.isna(end_date_display) or end_date_display in ['None', 'nan', '']:
+                            end_date_display = f"{pd.Timestamp.now().strftime('%Y-%m-%d')} (Hoy)"
+                        st.write(f"**Fecha Fin:** {end_date_display}")
+                        st.write(f"**Variantes:** {selected_row_sidebar.get('variants', 'N/A')}")
                     
-                    # Segunda fila: Bundle Profile, Trip Type, Conversion Window
-                    col4, col5, col6 = st.columns(3)
-                    with col4:
-                        bundle_profile_quick = st.selectbox(
-                            "✈️ Perfil de Vuelo",
-                            options=["ALL", "Vuela Ligero", "Smart", "Full", "Smart + Full"],
-                            index=0,
-                            key="bundle_profile_quick",
-                            help="Perfil de bundle del usuario (ALL = todos los perfiles)"
-                        )
-                    with col5:
-                        trip_type_quick = st.selectbox(
-                            "✈️ Tipo de Viaje",
-                            options=["ALL", "Solo Ida (One Way)", "Ida y Vuelta (Round Trip)"],
-                            index=0,
-                            key="trip_type_quick",
-                            help="Tipo de viaje a analizar (ALL = todos los tipos de viaje)"
-                        )
-                    with col6:
-                        conversion_window_options_quick = {
-                            "5 minutos": 300,
-                            "15 minutos": 900,
-                            "30 minutos": 1800,
-                            "1 hora": 3600,
-                            "1 día": 86400
-                        }
-                        conversion_window_label_quick = st.selectbox(
-                            "⏱️ Ventana de Conversión",
-                            options=list(conversion_window_options_quick.keys()),
-                            index=2,  # 30 minutos por defecto
-                            key="conversion_window_quick",
-                            help="Tiempo máximo para considerar una conversión válida"
-                        )
-                        conversion_window_quick = conversion_window_options_quick[conversion_window_label_quick]
+                    st.markdown("---")
                     
-                    # Tercera fila: Grupo de Viaje
-                    col7, col8, col9 = st.columns(3)
-                    with col7:
-                        travel_group_quick = st.selectbox(
-                            "👥 Grupo de Viaje",
-                            options=["ALL", "Viajero Solo", "Pareja", "Grupo", "Familia (con Menores)"],
-                            index=0,
-                            key="travel_group_quick",
-                            help="Tipo de grupo de viaje (ALL = todos los grupos)"
-                        )
-                    
-                    # Inicializar mapeo de filtros (se usará más adelante)
-                    event_filters_map_quick = {}
-                    metrics_to_process = []  # Inicializar siempre
-                    PREDEFINED_METRICS_QUICK = {}  # Inicializar como diccionario vacío
-                    
-                    # Cargar métricas automáticamente desde todas las carpetas
-                    try:
-                        from src.utils.metrics_loader import (
-                            load_all_metrics,
-                            get_all_metrics_flat,
-                            get_metrics_info
-                        )
-                        
-                        # Cargar todas las métricas organizadas por categoría
-                        metrics_by_category = load_all_metrics()
-                        
-                        # Obtener todas las métricas en un diccionario plano
-                        PREDEFINED_METRICS_QUICK = get_all_metrics_flat(metrics_by_category)
-                        
-                        # ---------------------------------------------------------
-                        # APLICAR GHOST ANCHORS BASADO EN MAPEO EXPLÍCITO
-                        # Modificar métricas dinámicamente según el primer evento
-                        # ---------------------------------------------------------
-                        for metric_name, metric_def in PREDEFINED_METRICS_QUICK.items():
-                            # Validar que la métrica tenga eventos definidos
-                            if isinstance(metric_def, dict) and 'events' in metric_def:
-                                events_list = metric_def.get('events', [])
-                                
-                                if len(events_list) > 0:
-                                    # Extraer el nombre del primer evento
-                                    first_event = events_list[0]
-                                    first_event_name = first_event[0] if isinstance(first_event, tuple) else first_event
-                                    
-                                    # Verificar si el primer evento necesita un ancla
-                                    if first_event_name in EVENT_ANCHOR_MAP:
-                                        anchor_event = EVENT_ANCHOR_MAP[first_event_name]
-                                        
-                                        # Verificar que el primer evento no sea ya el evento ancla
-                                        if first_event_name != anchor_event:
-                                            # 1. Inyectar el ancla al principio de la lista de eventos
-                                            anchor_tuple = (anchor_event, [])
-                                            events_list.insert(0, anchor_tuple)
-                                            
-                                            # 2. Activar modo oculto (para ignorar este paso en el gráfico final)
-                                            metric_def['hidden_first_step'] = True
-                                            
-                                            # print(f"🔧 Ghost Anchor: {metric_name} ahora inicia con {anchor_event}")
-                        
-                        # Mostrar información de métricas disponibles
-                        if PREDEFINED_METRICS_QUICK:
-                            with st.expander("Ver Métricas Disponibles", expanded=False):
-                                # Generar información automáticamente
-                                metrics_info_quick = get_metrics_info(PREDEFINED_METRICS_QUICK)
-                                
-                                if metrics_info_quick:
+                    # Mostrar tabla de métricas disponibles
+                    if PREDEFINED_METRICS_QUICK:
+                        try:
+                            from src.utils.metrics_loader import get_metrics_info
+                            metrics_info_quick = get_metrics_info(PREDEFINED_METRICS_QUICK)
+                            
+                            if metrics_info_quick:
+                                with st.expander("📚 Ver Métricas Disponibles", expanded=False):
                                     df_metrics_quick = pd.DataFrame(metrics_info_quick)
                                     st.dataframe(
                                         df_metrics_quick,
                                         use_container_width=True,
                                         hide_index=True
                                     )
-                                else:
-                                    st.info("No se encontraron métricas con información válida")
-                        else:
-                            st.warning("⚠️ No se encontraron métricas. Asegúrate de tener archivos *_metrics.py en las carpetas de metrics/")
-                        
-                        # Crear dos columnas para separar métricas y eventos
-                        col_metrics, col_events = st.columns(2)
-                        
-                        with col_metrics:
-                            st.markdown("#### Métricas Predefinidas")
-                            if PREDEFINED_METRICS_QUICK:
-                                selected_metrics_quick = st.multiselect(
-                                    "Métricas:",
-                                    options=list(PREDEFINED_METRICS_QUICK.keys()),
-                                    default=[],
-                                    key="metrics_quick",
-                                    help="Métricas completas predefinidas"
-                                )
-                            else:
-                                st.info("No hay métricas disponibles. Agrega archivos *_metrics.py en las carpetas de metrics/")
-                                selected_metrics_quick = []
-                        
-                        with col_events:
-                            st.markdown("#### Eventos Individuales")
-                            selected_events_raw_quick = st.multiselect(
-                                "Eventos:",
-                                options=AVAILABLE_EVENTS,
-                                default=["homepage_dom_loaded"],
-                                key="events_raw_quick",
-                                help="Eventos individuales"
-                            )
-                        
-                        # Procesar cada métrica seleccionada por separado
-                        for metric_name in selected_metrics_quick:
-                            metric_config = PREDEFINED_METRICS_QUICK[metric_name]
-                            metric_events = []
-                            metric_filters_map = {}
-                            
-                            # Nuevo formato: {'events': [('event1', [filter1, filter2]), ('event2', [filter1])]}
-                            # Siempre tuplas: ('evento', [lista_de_filtros])
-                            if isinstance(metric_config, dict) and 'events' in metric_config:
-                                events_list = metric_config['events']
-                                
-                                # Verificar si es el nuevo formato (tuplas con lista de filtros)
-                                if events_list:
-                                    first_item = events_list[0]
-                                    
-                                    # Nuevo formato: tupla con ('evento', [filtros])
-                                    if isinstance(first_item, tuple) and len(first_item) >= 2:
-                                        # Formato: ('evento', [filtros])
-                                        for event_tuple in events_list:
-                                            if isinstance(event_tuple, tuple) and len(event_tuple) >= 2:
-                                                event_name = event_tuple[0]
-                                                event_filters = event_tuple[1] if isinstance(event_tuple[1], list) else []
-                                                
-                                                metric_events.append(event_name)
-                                                
-                                                # Mapear filtros específicos para este evento
-                                                if event_filters:
-                                                    metric_filters_map[event_name] = event_filters
-                                                # Si la lista está vacía, no agregar al mapa (sin filtros adicionales)
-                                    
-                                    elif isinstance(first_item, tuple) and len(first_item) == 1:
-                                        # Formato antiguo: tupla simple ('evento',) - sin filtros
-                                        for event_tuple in events_list:
-                                            if isinstance(event_tuple, tuple) and len(event_tuple) > 0:
-                                                event_name = event_tuple[0]
-                                                metric_events.append(event_name)
-                                                # Sin filtros adicionales
-                                    
-                                    elif isinstance(first_item, str):
-                                        # Formato antiguo: lista de strings con 'filters' separado
-                                        metric_events = events_list
-                                        metric_filters = metric_config.get('filters', [])
-                                        
-                                        # Aplicar los mismos filtros a todos los eventos (comportamiento antiguo)
-                                        if metric_filters:
-                                            filters_list = metric_filters if isinstance(metric_filters, list) else [metric_filters]
-                                            for event in metric_events:
-                                                metric_filters_map[event] = filters_list.copy()
-                            
-                            # Formato antiguo (compatibilidad): lista simple de eventos
-                            elif isinstance(metric_config, list):
-                                metric_events = metric_config
-                                # Sin filtros para formato antiguo
-                            
-                            if metric_events:
-                                # Detectar si esta métrica tiene hidden_first_step (Ghost Anchor)
-                                hidden_first_step = False
-                                if isinstance(metric_config, dict):
-                                    hidden_first_step = metric_config.get('hidden_first_step', False)
-                                
-                                metrics_to_process.append({
-                                    'name': metric_name,
-                                    'events': metric_events,
-                                    'filters': metric_filters_map,
-                                    'hidden_first_step': hidden_first_step
-                                })
-                        
-                        # Agregar eventos individuales como una "métrica" adicional si están seleccionados
-                        if selected_events_raw_quick:
-                            metrics_to_process.append({
-                                'name': 'Eventos Individuales',
-                                'events': selected_events_raw_quick,
-                                'filters': {}
-                            })
-                        
-                        # Para compatibilidad con el código existente, también crear lista combinada
-                        selected_events_quick = []
-                        event_filters_map_quick = {}
-                        for metric_info in metrics_to_process:
-                            selected_events_quick.extend(metric_info['events'])
-                            event_filters_map_quick.update(metric_info['filters'])
-                        
-                        # Eliminar duplicados manteniendo el orden
-                        seen_quick = set()
-                        unique_events_quick = []
-                        for x in selected_events_quick:
-                            if x not in seen_quick:
-                                seen_quick.add(x)
-                                unique_events_quick.append(x)
-                        selected_events_quick = unique_events_quick
-                        
-                    except Exception as e:
-                        # Si hay error cargando métricas, mostrar mensaje y permitir usar solo eventos
-                        st.warning(f"⚠️ Error cargando métricas automáticamente: {e}")
-                        st.info("💡 Puedes usar eventos individuales mientras tanto")
-                        
-                        # Asegurar que PREDEFINED_METRICS_QUICK esté definido
-                        if 'PREDEFINED_METRICS_QUICK' not in locals():
-                            PREDEFINED_METRICS_QUICK = {}
-                        
-                        # Permitir seleccionar eventos individuales
-                        selected_metrics_quick = []
-                        selected_events_raw_quick = st.multiselect(
-                            "Eventos a analizar:",
-                            options=AVAILABLE_EVENTS,
-                            default=["homepage_dom_loaded"],
-                            key="events_quick",
-                            help="Selecciona los eventos que quieres analizar"
-                        )
-                        if selected_events_raw_quick:
-                            metrics_to_process.append({
-                                'name': 'Eventos Individuales',
-                                'events': selected_events_raw_quick,
-                                'filters': {}
-                            })
-                        selected_events_quick = selected_events_raw_quick if selected_events_raw_quick else []
+                        except Exception as e:
+                            st.warning(f"⚠️ Error mostrando métricas: {e}")
                     
-                    # Botón para ejecutar análisis rápido
-                    col1, col2, col3 = st.columns([1, 1, 1])
+                    st.markdown("---")
+                    
+                    # Botón de ejecutar en el área principal
+                    col1, col2, col3 = st.columns([1, 2, 1])
                     with col2:
                         btn_run_quick = st.button(
-                            "🚀 Ejecutar Análisis de este Experimento",
+                            "🚀 Ejecutar Análisis",
                             use_container_width=True,
                             type="primary",
-                            disabled=len(metrics_to_process) == 0,
-                            key="btn_run_quick"
+                            key="btn_run_quick_main",
+                            disabled=len(metrics_to_process_sidebar) == 0
                         )
                     
-                    # Ejecutar análisis si se presiona el botón
-                    if btn_run_quick and metrics_to_process:
+                    # Guardar en session_state cuando se presiona el botón
+                    if btn_run_quick and metrics_to_process_sidebar:
+                        st.session_state['run_analysis'] = True
+                        st.session_state['metrics_to_process'] = metrics_to_process_sidebar
+                        st.session_state['selected_row_original'] = st.session_state['selected_row_original_sidebar']
+                        st.session_state['selected_row'] = selected_row_sidebar
+                
+                # Ejecutar análisis si se presionó el botón
+                if st.session_state.get('run_analysis', False) and st.session_state.get('metrics_to_process'):
+                    metrics_to_process = st.session_state['metrics_to_process']
+                    selected_row_original = st.session_state['selected_row_original']
+                    selected_row = st.session_state['selected_row']
+                    # Leer valores directamente de los widgets (que ya están en session_state automáticamente)
+                    device_quick = st.session_state.get('device_quick', 'ALL')
+                    culture_quick = st.session_state.get('culture_quick', 'ALL')
+                    flow_type_quick = st.session_state.get('flow_type_quick', 'ALL')
+                    bundle_profile_quick = st.session_state.get('bundle_profile_quick', 'ALL')
+                    trip_type_quick = st.session_state.get('trip_type_quick', 'ALL')
+                    travel_group_quick = st.session_state.get('travel_group_quick', 'ALL')
+                    
+                    # Obtener ventana de conversión (ya convertida a segundos en la sidebar)
+                    # El widget guarda el string en 'conversion_window_quick', pero guardamos el entero en 'conversion_window_seconds'
+                    conversion_window_quick = st.session_state.get('conversion_window_seconds', 1800)
+                    # Fallback: si no existe el valor convertido, convertir desde el string
+                    if conversion_window_quick == 1800 and 'conversion_window_quick' in st.session_state:
+                        conversion_window_label = st.session_state.get('conversion_window_quick')
+                        if isinstance(conversion_window_label, str):
+                            conversion_window_map = {
+                                "5 minutos": 300,
+                                "15 minutos": 900,
+                                "30 minutos": 1800,
+                                "1 hora": 3600,
+                                "1 día": 86400
+                            }
+                            conversion_window_quick = conversion_window_map.get(conversion_window_label, 1800)
+                    
+                    use_cumulative = st.session_state.get('use_cumulative', True)
+                    
+                    # Ejecutar análisis
+                    if metrics_to_process:
                         with st.spinner("Ejecutando análisis..."):
                             try:
                                 # Obtener fechas del experimento con precisión horaria desde el DataFrame original
@@ -1010,10 +1044,20 @@ def run_ui():
                                         )
                                 else:
                                     st.warning("⚠️ No hay datos detallados disponibles para mostrar")
-                                    
+                                
+                                # Resetear el flag de ejecución después de procesar
+                                st.session_state['run_analysis'] = False
+                                
                             except Exception as e:
                                 st.error(f"❌ Error ejecutando análisis: {e}")
                                 st.exception(e)
+                                # Resetear el flag incluso si hay error
+                                st.session_state['run_analysis'] = False
+                    else:
+                        # Si no hay métricas seleccionadas, mostrar mensaje
+                        if st.session_state.get('run_analysis', False):
+                            st.warning("⚠️ Por favor selecciona al menos una métrica o evento en la barra lateral")
+                            st.session_state['run_analysis'] = False
                 
                 # Botón de descarga para experimentos
                 col1, col2, col3 = st.columns([1, 1, 1])
@@ -1046,6 +1090,10 @@ def run_ui():
             except Exception as e:
                 st.error(f"❌ Error inesperado al listar experimentos: {e}")
                 st.exception(e)
+            
+            # Resetear el flag de ejecución después de procesar
+            if st.session_state.get('run_analysis', False):
+                st.session_state['run_analysis'] = False
 
     with tab_statistical:
         st.subheader("📊 Análisis Estadístico A/B/N")
