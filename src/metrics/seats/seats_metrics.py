@@ -162,18 +162,23 @@ INBOUND_SEAT_CR = {'events': [
     ('revenue_amount', [has_seat_purchase_filter()])  # GOAL: Validar compra
 ]}
 
-# ===== ADD TO CART (A2C) =====
+# ===== ADD TO CART (A2C) - ESTRATEGIA GHOST ANCHOR =====
 
-# Seats A2C - General (Selección de asientos)
+# Seats A2C - General (Estrategia Ghost Anchor)
+# PROBLEMA RESUELTO: Al filtrar por segmentos (ej: "Travel Group = Familia"), 
+# el evento continue_clicked_seat devuelve 0 porque NO tiene la propiedad de segmento.
+# SOLUCIÓN: Funnel de 2 pasos donde:
+# - Paso 1 (seatmap_dom_loaded): ÚNICO que recibe filtros de segmento (Family, Business, etc.)
+# - Paso 2 (continue_clicked_seat): NO recibe filtros de segmento, solo valida que se seleccionaron asientos
 SEATS_A2C = {'events': [
-    ('seatmap_dom_loaded', []),
-    ('continue_clicked_seat', [seat_selected_filter()])
+    ('seatmap_dom_loaded', []),  # 1. ANCHOR: Aquí "muerden" los filtros globales del Dashboard (Family, Business, etc.)
+    ('continue_clicked_seat', [seats_count_filter()])  # 2. TARGET: NO recibe filtros de segmento, solo valida que se seleccionaron asientos
 ]}
 
-# Seats A2C - DB
+# Seats A2C - DB (Estrategia Ghost Anchor)
 SEATS_DB_A2C = {'events': [
-    ('seatmap_dom_loaded', [get_DB_filter()]),
-    ('continue_clicked_seat', [seat_selected_filter(), get_DB_filter()])
+    ('seatmap_dom_loaded', [get_DB_filter()]),  # ANCHOR: Filtro DB + filtros globales
+    ('continue_clicked_seat', [seats_count_filter()])  # TARGET: NO recibe filtros de segmento, solo filtro técnico
 ]}
 
 # Seats A2C - Outbound (Selección de asiento de ida)
