@@ -216,8 +216,15 @@ def get_funnel_data_experiment(api_key, secret_key, start_date, end_date, experi
 		else:
 			event_name = str(event)
 		
-		# PASO B: Agregar SIEMPRE los filtros de segmentación (Device, Culture)
-		# Estos filtros garantizan que el cohorte sea consistente en todo el funnel
+		# PASO B: Agregar filtros de segmentación (Device, Culture)
+		# ESTRATEGIA GHOST ANCHOR: Los filtros de segmentación complejos (Travel Group, etc.)
+		# solo se aplican al primer evento (índice 0). Los filtros básicos (Device, Culture)
+		# se aplican a todos los eventos para mantener el cohorte.
+		# NOTA: Para eventos que no tienen propiedades de segmentación (ej: continue_clicked_seat),
+		# solo aplicamos Device y Culture, NO Travel Group u otros filtros complejos.
+		is_anchor_event = (idx == 0)
+		
+		# Device y Culture se aplican a todos los eventos (filtros básicos de cohorte)
 		event_filters.extend(segmentation_filters)
 		
 		# PASO C: Construir filtros contextuales con "Filtrado Estricto de Primer Paso"
