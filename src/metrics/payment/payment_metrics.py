@@ -3,29 +3,35 @@ from src.utils.amplitude_filters import (
     get_DB_filter
 )
 
+# ===== NEXT STEP RATE (NSR) =====
+
 # Next Step Rate Payment (Payment to Confirmation)
-NSR_PAYMENT = {'events': [
+PAYMENT_NSR = {'events': [
     ('payment_dom_loaded', []),
     ('revenue_amount', [])
 ]}
 
 # Next Step Rate Payment - DB
-NSR_PAYMENT_DB = {'events': [
+PAYMENT_DB_NSR = {'events': [
     ('payment_dom_loaded', [get_DB_filter()]),
     ('revenue_amount', [get_DB_filter()])
 ]}
 
+# ===== WEBSITE CONVERSION RATE (WCR) =====
+
 # Website Conversion Rate from Payment - General
-WCR_PAYMENT = {'events': [
+PAYMENT_WCR = {'events': [
     ('payment_dom_loaded', []),
     ('revenue_amount', [])
 ]}
 
 # Website Conversion Rate from Payment - DB
-WCR_PAYMENT_DB = {'events': [
+PAYMENT_DB_WCR = {'events': [
     ('payment_dom_loaded', [get_DB_filter()]),
     ('revenue_amount', [get_DB_filter()])
 ]}
+
+# ===== SELECTION RATE =====
 
 # Payment Method Selection Rate
 PAYMENT_SELECTED_RATE = {'events': [
@@ -57,9 +63,10 @@ TOGGLE_TAXES_RATE = {'events': [
     ('click_toggle_taxes', [])
 ]}
 
+# ===== PAYMENT TO REVENUE (MANTENER EXACTO) =====
+
 # Payment to Revenue (Final Conversion)
 PAYMENT_TO_REVENUE = {'events': [
     ('payment_dom_loaded', []),
     ('revenue_amount', [])
 ]}
-

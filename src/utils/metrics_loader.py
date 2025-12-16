@@ -7,10 +7,12 @@ por carpeta y generando información para mostrar en el dashboard.
 """
 
 import os
+import sys
 import importlib.util
 from pathlib import Path
 from typing import Dict, List, Any, Tuple
 import inspect
+import time
 
 
 def is_valid_metric(obj: Any) -> bool:
@@ -104,9 +106,22 @@ def load_metrics_from_file(file_path: Path, category: str) -> Dict[str, Dict]:
     metrics = {}
     
     try:
+        # Limpiar caché de módulos relacionados con este archivo
+        # Buscar y eliminar módulos cacheados que coincidan con el patrón
+        module_pattern = f"metrics_{category}_{file_path.stem}"
+        modules_to_remove = [
+            name for name in sys.modules.keys() 
+            if name.startswith(module_pattern) or name == f"src.metrics.{category}.{file_path.stem}"
+        ]
+        for module_name in modules_to_remove:
+            del sys.modules[module_name]
+        
+        # Generar un nombre único para el módulo para evitar caché
+        module_name = f"metrics_{category}_{file_path.stem}_{int(time.time() * 1000000)}"
+        
         # Cargar el módulo dinámicamente
         spec = importlib.util.spec_from_file_location(
-            f"metrics_{category}_{file_path.stem}",
+            module_name,
             file_path
         )
         if spec is None or spec.loader is None:
@@ -123,8 +138,9 @@ def load_metrics_from_file(file_path: Path, category: str) -> Dict[str, Dict]:
             
             # Verificar si es una métrica válida
             if is_valid_metric(obj):
-                # Generar nombre de display sin emoji
-                display_name = generate_display_name(name, '')
+                # Usar el nombre de la variable directamente (nomenclatura abreviada)
+                # Ejemplo: SEATS_WCR, BAGGAGE_NSR, etc.
+                display_name = name
                 
                 metrics[display_name] = obj
         
@@ -137,57 +153,195 @@ def load_metrics_from_file(file_path: Path, category: str) -> Dict[str, Dict]:
 def generate_display_name(var_name: str, emoji: str = '') -> str:
     """
     Genera un nombre de display legible a partir del nombre de variable.
+    Maneja la nueva nomenclatura estándar: [STEP]_[TYPE], [STEP]_DB_[TYPE], etc.
     
     Args:
-        var_name: Nombre de la variable (ej: 'NSR_BAGGAGE')
+        var_name: Nombre de la variable (ej: 'SEATS_WCR', 'BAGGAGE_DB_NSR')
         emoji: Emoji para la categoría (opcional, por defecto vacío)
         
     Returns:
-        str: Nombre de display (ej: 'NSR Baggage')
+        str: Nombre de display (ej: 'Website Conversion Rate Seats')
     """
-    # Mapeo de prefijos comunes a descripciones
-    prefix_map = {
-        'NSR': 'Next Step Rate',
+    # Mapeo de tipos de métricas
+    metric_type_map = {
         'WCR': 'Website Conversion Rate',
+        'NSR': 'Next Step Rate',
         'A2C': 'Add to Cart',
-        'CABIN_BAG': 'Cabin Bag',
-        'CHECKED_BAG': 'Checked Bag',
-        'DB': 'DB'
+        'CR': 'Cr',
+        'SELECTION_RATE': 'Selection Rate',
+        'CONTINUE_RATE': 'Continue Rate',
     }
     
-    # Remover prefijos comunes y construir nombre legible
+    # Mapeo de steps/categorías
+    step_map = {
+        'SEATS': 'Seats',
+        'BAGGAGE': 'Baggage',
+        'PAYMENT': 'Payment',
+        'PASSENGERS': 'Passengers',
+        'FLIGHT': 'Flight',
+        'EXTRAS': 'Extras',
+        'CABIN_BAG': 'Cabin Bag',
+        'CHECKED_BAG': 'Checked Bag',
+        'OUTBOUND_SEAT': 'Outbound Seat',
+        'INBOUND_SEAT': 'Inbound Seat',
+        'OUTBOUND_FLIGHT': 'Outbound Flight',
+        'INBOUND_FLIGHT': 'Inbound Flight',
+        'PRIORITY_BOARDING': 'Priority Boarding',
+        'PET': 'Pet',
+        'INSURANCE': 'Insurance',
+        'FLEXI': 'Flexi',
+        'EXTRAS_GENERAL': 'Extras General',
+        'DISCOUNT_CLUB': 'Discount Club',
+        'ANCILLARY_MODAL': 'Ancillary Modal',
+        'AIRPORT_CHECKIN': 'Airport Checkin',
+    }
+    
+    # Mapeo de modificadores
+    modifier_map = {
+        'DB': 'DB',
+        'VUELA_LIGERO': 'Vuela Ligero',
+        'WITH_SELECTION': 'With Selection',
+        'WITH_BUNDLE': 'With Bundle',
+    }
+    
     name_parts = var_name.split('_')
     
-    # Identificar prefijos conocidos
-    description_parts = []
-    skip_next = False
+    # Detectar el tipo de métrica (último elemento o penúltimo si hay DB)
+    metric_type = None
+    step = None
+    modifiers = []
+    db_modifier = None
     
-    for i, part in enumerate(name_parts):
-        if skip_next:
-            skip_next = False
-            continue
-        
-        if part in prefix_map:
-            description_parts.append(prefix_map[part])
-            # Si es DB, puede venir después de otra parte
-            if part == 'DB' and i > 0:
-                continue
-        elif part == 'VUELA_LIGERO':
-            description_parts.append('Vuela Ligero')
-        elif part in ['BAGGAGE', 'SEAT', 'PAYMENT', 'PASSENGER', 'EXTRA', 'FLIGHT']:
-            # Convertir a título
-            description_parts.append(part.capitalize())
+    # Casos especiales primero
+    if var_name == 'PAYMENT_TO_REVENUE':
+        base_name = 'Payment To Revenue'
+        if emoji:
+            return f"{emoji} {base_name}"
+        return base_name
+    
+    # Buscar tipo de métrica (WCR, NSR, A2C, CR) al final
+    if len(name_parts) >= 2:
+        # Verificar si el último es un tipo de métrica
+        last_part = name_parts[-1]
+        if last_part in metric_type_map:
+            metric_type = metric_type_map[last_part]
+            # El penúltimo podría ser DB
+            if len(name_parts) >= 3 and name_parts[-2] == 'DB':
+                db_modifier = 'DB'
+                # El step está antes de DB
+                remaining = name_parts[:-2]
+            else:
+                remaining = name_parts[:-1]
+        # Verificar si hay SELECTION_RATE o CONTINUE_RATE (dos partes)
+        elif len(name_parts) >= 2 and f"{name_parts[-2]}_{name_parts[-1]}" in metric_type_map:
+            metric_type = metric_type_map[f"{name_parts[-2]}_{name_parts[-1]}"]
+            remaining = name_parts[:-2]
         else:
-            # Agregar como está (puede ser parte de un nombre compuesto)
-            if part not in ['NEW', 'CE']:
-                description_parts.append(part.capitalize())
+            # No hay tipo de métrica al final, podría ser un nombre especial
+            remaining = name_parts
     
-    # Construir nombre final
-    if description_parts:
-        base_name = ' '.join(description_parts)
+    # Identificar el step y modificadores
+    step_candidates = []
+    used_indices = set()
+    
+    # Primero buscar steps (combinaciones de dos partes primero para mayor especificidad)
+    for i, part in enumerate(remaining):
+        if i in used_indices:
+            continue
+        # Verificar combinaciones de dos partes primero (más específicas)
+        if i < len(remaining) - 1:
+            two_part = f"{part}_{remaining[i+1]}"
+            if two_part in step_map:
+                step_candidates.append((i, step_map[two_part], 2))
+                used_indices.add(i)
+                used_indices.add(i + 1)
+        # Verificar si es un step completo de una parte
+        if i not in used_indices and part in step_map:
+            step_candidates.append((i, step_map[part], 1))
+            used_indices.add(i)
+    
+    # Tomar el step más largo (más específico)
+    if step_candidates:
+        # Ordenar por longitud del nombre (más específico primero)
+        step_candidates.sort(key=lambda x: len(x[1]), reverse=True)
+        best_step = step_candidates[0]
+        step = best_step[1]
+        step_start_idx = best_step[0]
+        step_length = best_step[2]
+        step_end_idx = step_start_idx + step_length
+        
+        # Procesar partes antes del step (modificadores)
+        for i in range(step_start_idx):
+            if i in used_indices:
+                continue
+            part = remaining[i]
+            # Verificar combinaciones de dos partes para modificadores
+            if i < len(remaining) - 1:
+                two_part = f"{part}_{remaining[i+1]}"
+                if two_part in modifier_map:
+                    modifiers.append(modifier_map[two_part])
+                    used_indices.add(i)
+                    used_indices.add(i + 1)
+                    continue
+            if part in modifier_map:
+                modifiers.append(modifier_map[part])
+                used_indices.add(i)
+            elif part == 'DB':
+                db_modifier = 'DB'
+                used_indices.add(i)
+        
+        # Procesar partes después del step (modificadores adicionales)
+        i = step_end_idx
+        while i < len(remaining):
+            if i in used_indices:
+                i += 1
+                continue
+            part = remaining[i]
+            # Verificar combinaciones de dos partes para modificadores
+            if i < len(remaining) - 1:
+                two_part = f"{part}_{remaining[i+1]}"
+                if two_part in modifier_map:
+                    modifiers.append(modifier_map[two_part])
+                    used_indices.add(i)
+                    used_indices.add(i + 1)
+                    i += 2
+                    continue
+            if part in modifier_map:
+                modifiers.append(modifier_map[part])
+                used_indices.add(i)
+            elif part == 'DB':
+                db_modifier = 'DB'
+                used_indices.add(i)
+            i += 1
     else:
-        # Fallback: convertir snake_case a Title Case
+        # No se encontró step conocido, usar todas las partes como step
+        step = ' '.join(word.capitalize() for word in remaining)
+    
+    # Construir el nombre final
+    # Formato: [Tipo de Métrica] [Step] [Modificadores]
+    name_parts_final = []
+    
+    # Agregar tipo de métrica primero
+    if metric_type:
+        name_parts_final.append(metric_type)
+    
+    # Agregar step
+    if step:
+        name_parts_final.append(step)
+    
+    # Agregar DB si existe (después del step)
+    if db_modifier:
+        name_parts_final.append(db_modifier)
+    
+    # Agregar otros modificadores al final
+    if modifiers:
+        name_parts_final.extend(modifiers)
+    
+    # Si no se construyó nada, usar fallback
+    if not name_parts_final:
         base_name = ' '.join(word.capitalize() for word in name_parts)
+    else:
+        base_name = ' '.join(name_parts_final)
     
     # Agregar emoji al inicio solo si se proporciona
     if emoji:

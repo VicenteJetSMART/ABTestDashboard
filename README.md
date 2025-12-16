@@ -29,13 +29,47 @@ python -m venv venv
 # Actualizar pip e instalar dependencias
 python -m pip install --upgrade pip
 pip install -r requirements.txt
+
+# (Opcional) Instalar dependencias de desarrollo
+pip install -r requirements-dev.txt
 ```
+
+**Nota:** Puedes usar el mismo entorno virtual (`venv`) para producción y desarrollo. No es necesario crear entornos separados.
 
 ### Ejecutar la app
 
-Con el entorno virtual activo, desde la raíz del proyecto:
+**Método recomendado (Windows):**
+
+El script `iniciar_app.bat` usa automáticamente el Python del entorno virtual (`venv\Scripts\python.exe`), por lo que **no necesitas activar el entorno virtual manualmente**. Solo asegúrate de que el entorno virtual esté creado (ver sección "Entorno virtual e instalación" arriba).
+
+Simplemente ejecuta el archivo `.bat` desde el Explorador de Archivos o desde la terminal:
+
+```cmd
+iniciar_app.bat
+```
+
+O desde PowerShell:
 
 ```powershell
+.\iniciar_app.bat
+```
+
+El script automáticamente:
+- ✅ Verifica que el entorno virtual existe (`venv\Scripts\python.exe`)
+- ✅ Usa el Python del entorno virtual sin necesidad de activarlo manualmente
+- ✅ Verifica e instala dependencias si es necesario
+- ✅ Inicia la aplicación Streamlit
+- ✅ Abre la aplicación en `http://localhost:8501`
+
+**Método alternativo (PowerShell/CMD):**
+
+Si prefieres iniciar manualmente, con el entorno virtual activo:
+
+```powershell
+# Activar el entorno virtual
+./venv/Scripts/Activate.ps1
+
+# Iniciar Streamlit
 streamlit run app.py
 ```
 
@@ -43,7 +77,9 @@ streamlit run app.py
 ```
 .
   app.py                    # App principal de Streamlit
-  requirements.txt          # Dependencias
+  iniciar_app.bat           # Script para iniciar la app (Windows)
+  requirements.txt          # Dependencias de producción
+  requirements-dev.txt      # Dependencias de desarrollo (opcional)
   utils/experiment_utils.py # Librería con lógica de Amplitude y pipelines
   metrics/                  # Métricas por step (baggage, seats, etc.)
   METRICS_GUIDE.md          # Guía para agregar métricas
@@ -59,8 +95,10 @@ Consulta la guía completa en `METRICS_GUIDE.md` y el ejemplo `EXAMPLE_SEATS_MET
 
 ### Troubleshooting
 - Verifica que el `.env` esté en la raíz del proyecto.
-- Asegúrate de activar el entorno virtual antes de ejecutar.
+- Si usas `iniciar_app.bat`, el script verifica e instala dependencias automáticamente.
+- Si ejecutas manualmente, asegúrate de activar el entorno virtual antes de ejecutar.
 - Si faltan paquetes, ejecuta `pip install -r requirements.txt` desde la raíz del proyecto.
+- Si el script `.bat` no encuentra el entorno virtual, verifica que existe `venv\Scripts\python.exe`.
 - Revisa la pestaña "❓ Ayuda" dentro de la app para parámetros y ejemplos.
 
 ### Actualizar el código desde GitHub
@@ -164,7 +202,17 @@ pip install -r requirements.txt
 
 Si la aplicación estaba corriendo, deténla (Ctrl+C) y vuelve a ejecutarla:
 
+**Método recomendado:**
+```cmd
+iniciar_app.bat
+```
+
+**O manualmente:**
 ```powershell
+# Activar el entorno virtual
+./venv/Scripts/Activate.ps1
+
+# Iniciar Streamlit
 streamlit run app.py
 ```
 

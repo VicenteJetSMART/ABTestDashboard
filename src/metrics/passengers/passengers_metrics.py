@@ -3,29 +3,35 @@ from src.utils.amplitude_filters import (
     get_DB_filter
 )
 
+# ===== NEXT STEP RATE (NSR) =====
+
 # Next Step Rate Passengers - General
-NSR_PASSENGERS = {'events': [
+PASSENGERS_NSR = {'events': [
     ('passengers_dom_loaded', []),
     ('payment_dom_loaded', [])
 ]}
 
 # Next Step Rate Passengers - DB
-NSR_PASSENGERS_DB = {'events': [
+PASSENGERS_DB_NSR = {'events': [
     ('passengers_dom_loaded', [get_DB_filter()]),
     ('payment_dom_loaded', [get_DB_filter()])
 ]}
 
+# ===== WEBSITE CONVERSION RATE (WCR) =====
+
 # Website Conversion Rate from Passengers - General
-WCR_PASSENGERS = {'events': [
+PASSENGERS_WCR = {'events': [
     ('passengers_dom_loaded', []),
     ('revenue_amount', [])
 ]}
 
 # Website Conversion Rate from Passengers - DB
-WCR_PASSENGERS_DB = {'events': [
+PASSENGERS_DB_WCR = {'events': [
     ('passengers_dom_loaded', [get_DB_filter()]),
     ('revenue_amount', [get_DB_filter()])
 ]}
+
+# ===== CONTINUE RATE =====
 
 # Continue Clicked Passengers Rate
 PASSENGERS_CONTINUE_RATE = {'events': [
@@ -50,4 +56,3 @@ PASSENGERS_LOGIN_RATE = {'events': [
     ('passengers_dom_loaded', []),
     ('user_login', [])
 ]}
-

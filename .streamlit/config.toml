@@ -1,0 +1,18 @@
+[theme]
+# IMPORTANTE: No definir backgroundColor, secondaryBackgroundColor, ni textColor
+# para permitir la detección automática del tema del sistema mediante CSS
+primaryColor = "#3CCFE7"
+font = "sans serif"
+
+# Descomentar la siguiente línea SOLO si quieres forzar un tema específico:
+# base = "light"  # o "dark"
+
+[server]
+headless = false
+port = 8501
+enableCORS = false
+enableXsrfProtection = true
+
+[browser]
+gatherUsageStats = false
+

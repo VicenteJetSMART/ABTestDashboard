@@ -3,29 +3,35 @@ from src.utils.amplitude_filters import (
     get_DB_filter
 )
 
+# ===== NEXT STEP RATE (NSR) =====
+
 # Next Step Rate Extras - General
-NSR_EXTRAS = {'events': [
+EXTRAS_NSR = {'events': [
     ('extras_dom_loaded', []),
     ('passengers_dom_loaded', [])
 ]}
 
 # Next Step Rate Extras - DB
-NSR_EXTRAS_DB = {'events': [
+EXTRAS_DB_NSR = {'events': [
     ('extras_dom_loaded', [get_DB_filter()]),
     ('passengers_dom_loaded', [get_DB_filter()])
 ]}
 
+# ===== WEBSITE CONVERSION RATE (WCR) =====
+
 # Website Conversion Rate from Extras - General
-WCR_EXTRAS = {'events': [
+EXTRAS_WCR = {'events': [
     ('extras_dom_loaded', []),
     ('revenue_amount', [])
 ]}
 
 # Website Conversion Rate from Extras - DB
-WCR_EXTRAS_DB = {'events': [
+EXTRAS_DB_WCR = {'events': [
     ('extras_dom_loaded', [get_DB_filter()]),
     ('revenue_amount', [get_DB_filter()])
 ]}
+
+# ===== SELECTION RATE =====
 
 # Extra Selection Rate
 EXTRA_SELECTION_RATE = {'events': [
@@ -45,16 +51,16 @@ MODAL_ANCILLARY_RATE = {'events': [
     ('modal_ancillary_clicked', [])
 ]}
 
-# ===== ADD TO CART (A2C) - Extras =====
+# ===== ADD TO CART (A2C) =====
 
 # Add to Cart Extras General
-ADD_TO_CART_EXTRAS_GENERAL = {'events': [
+EXTRAS_GENERAL_A2C = {'events': [
     ('extras_dom_loaded', []),
     ('extra_selected', [])
 ]}
 
 # Add to Cart Flexi (El filtro va en el SEGUNDO evento)
-ADD_TO_CART_FLEXI = {'events': [
+FLEXI_A2C = {'events': [
     ('extras_dom_loaded', []),
     ('extra_selected', [{
         'subprop_type': 'event',
@@ -65,7 +71,7 @@ ADD_TO_CART_FLEXI = {'events': [
 ]}
 
 # Add to Cart Airport Checkin (El filtro va en el SEGUNDO evento)
-ADD_TO_CART_AIRPORT_CHECKIN = {'events': [
+AIRPORT_CHECKIN_A2C = {'events': [
     ('extras_dom_loaded', []),
     ('extra_selected', [{
         'subprop_type': 'event',
@@ -76,7 +82,7 @@ ADD_TO_CART_AIRPORT_CHECKIN = {'events': [
 ]}
 
 # Add to Cart Priority Boarding (El filtro va en el SEGUNDO evento)
-ADD_TO_CART_PRIORITY_BOARDING = {'events': [
+PRIORITY_BOARDING_A2C = {'events': [
     ('extras_dom_loaded', []),
     ('extra_selected', [{
         'subprop_type': 'event',
@@ -87,7 +93,7 @@ ADD_TO_CART_PRIORITY_BOARDING = {'events': [
 ]}
 
 # Add to Cart Pet (El filtro va en el SEGUNDO evento)
-ADD_TO_CART_PET = {'events': [
+PET_A2C = {'events': [
     ('extras_dom_loaded', []),
     ('extra_selected', [{
         'subprop_type': 'event',
@@ -98,7 +104,7 @@ ADD_TO_CART_PET = {'events': [
 ]}
 
 # Add to Cart Insurance (El filtro va en el SEGUNDO evento)
-ADD_TO_CART_INSURANCE = {'events': [
+INSURANCE_A2C = {'events': [
     ('extras_dom_loaded', []),
     ('extra_selected', [{
         'subprop_type': 'event',
@@ -108,16 +114,16 @@ ADD_TO_CART_INSURANCE = {'events': [
     }])
 ]}
 
-# ===== CONVERSION RATE (CR) - Extras =====
+# ===== CONVERSION RATE (CR) =====
 
 # CR Extras General
-CR_EXTRAS_GENERAL = {'events': [
+EXTRAS_GENERAL_CR = {'events': [
     ('extra_selected', []),
     ('revenue_amount', [])
 ]}
 
 # CR Flexi (El filtro va en el PRIMER evento)
-CR_FLEXI = {'events': [
+FLEXI_CR = {'events': [
     ('extra_selected', [{
         'subprop_type': 'event',
         'subprop_key': 'type',
@@ -128,7 +134,7 @@ CR_FLEXI = {'events': [
 ]}
 
 # CR Airport Checkin (El filtro va en el PRIMER evento)
-CR_AIRPORT_CHECKIN = {'events': [
+AIRPORT_CHECKIN_CR = {'events': [
     ('extra_selected', [{
         'subprop_type': 'event',
         'subprop_key': 'type',
@@ -139,7 +145,7 @@ CR_AIRPORT_CHECKIN = {'events': [
 ]}
 
 # CR Priority Boarding (El filtro va en el PRIMER evento)
-CR_PRIORITY_BOARDING = {'events': [
+PRIORITY_BOARDING_CR = {'events': [
     ('extra_selected', [{
         'subprop_type': 'event',
         'subprop_key': 'type',
@@ -150,7 +156,7 @@ CR_PRIORITY_BOARDING = {'events': [
 ]}
 
 # CR Pet (El filtro va en el PRIMER evento)
-CR_PET = {'events': [
+PET_CR = {'events': [
     ('extra_selected', [{
         'subprop_type': 'event',
         'subprop_key': 'type',
@@ -161,7 +167,7 @@ CR_PET = {'events': [
 ]}
 
 # CR Insurance (El filtro va en el PRIMER evento)
-CR_INSURANCE = {'events': [
+INSURANCE_CR = {'events': [
     ('extra_selected', [{
         'subprop_type': 'event',
         'subprop_key': 'type',
@@ -170,4 +176,3 @@ CR_INSURANCE = {'events': [
     }]),
     ('revenue_amount', [])
 ]}
-
