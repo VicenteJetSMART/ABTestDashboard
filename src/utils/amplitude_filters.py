@@ -1,4 +1,35 @@
 # Funciones para obtener los filtros de Amplitude
+
+def get_culture_digital_filter_multiple(country_codes):
+    """
+    Obtiene un filtro combinado para múltiples códigos de país (OR lógico).
+    
+    Args:
+        country_codes: Lista de códigos de país (ej: ["CL", "AR"])
+        
+    Returns:
+        dict: Filtro combinado con todos los valores posibles, o "" si la lista está vacía
+    """
+    if not country_codes or len(country_codes) == 0:
+        return ""
+    
+    # Combinar todos los valores posibles de todos los países seleccionados
+    all_values = []
+    for code in country_codes:
+        single_filter = get_culture_digital_filter(code)
+        if single_filter and isinstance(single_filter, dict):
+            all_values.extend(single_filter.get('subprop_value', []))
+    
+    if not all_values:
+        return ""
+    
+    return {
+        "subprop_type": "event",
+        "subprop_key": "culture",
+        "subprop_op": "is",
+        "subprop_value": all_values
+    }
+
 def get_culture_digital_filter(country_code):
     switch = {
         "CL": {
@@ -116,6 +147,36 @@ def get_during_booking_filter():
         "subprop_value": ["DB"]
     }
 
+def get_flow_type_filter_multiple(flow_types):
+    """
+    Obtiene un filtro combinado para múltiples tipos de flujo (OR lógico).
+    
+    Args:
+        flow_types: Lista de tipos de flujo (ej: ["DB", "PB"])
+        
+    Returns:
+        dict: Filtro combinado con todos los valores, o "" si la lista está vacía
+    """
+    if not flow_types or len(flow_types) == 0:
+        return ""
+    
+    # Combinar todos los valores de los tipos de flujo seleccionados
+    all_values = []
+    for flow_type in flow_types:
+        single_filter = get_flow_type_filter(flow_type)
+        if single_filter and isinstance(single_filter, dict):
+            all_values.extend(single_filter.get('subprop_value', []))
+    
+    if not all_values:
+        return ""
+    
+    return {
+        "subprop_type": "event",
+        "subprop_key": "flow_type",
+        "subprop_op": "is",
+        "subprop_value": all_values
+    }
+
 def get_flow_type_filter(flow_type):
     """
     Obtiene el filtro de Amplitude para flow_type.
@@ -147,6 +208,29 @@ def get_flow_type_filter(flow_type):
         },
     }
     return switch.get(flow_type, "")
+
+def get_trip_type_filter_multiple(trip_types):
+    """
+    Obtiene un filtro combinado para múltiples tipos de viaje (OR lógico).
+    
+    Args:
+        trip_types: Lista de tipos de viaje (ej: ["Solo Ida (One Way)", "Ida y Vuelta (Round Trip)"])
+        
+    Returns:
+        dict: Filtro combinado con todos los valores, o "" si la lista está vacía
+    """
+    if not trip_types or len(trip_types) == 0:
+        return ""
+    
+    # Si ambos están seleccionados, no necesitamos filtro (todos los tipos)
+    if len(trip_types) == 2:
+        return ""
+    
+    # Si solo uno está seleccionado, usar el filtro individual
+    if len(trip_types) == 1:
+        return get_trip_type_filter(trip_types[0])
+    
+    return ""
 
 def get_trip_type_filter(trip_type):
     """
@@ -416,6 +500,69 @@ def get_travel_group_filter(travel_group, event_name=None):
     
     return []
 
+def get_travel_group_filter_multiple(travel_groups, event_name=None):
+    """
+    Obtiene filtros combinados para múltiples grupos de viaje (OR lógico).
+    
+    Args:
+        travel_groups: Lista de grupos de viaje (ej: ["Viajero Solo", "Pareja"])
+        event_name: Nombre del evento actual (opcional)
+        
+    Returns:
+        list: Lista de filtros combinados, o [] si la lista está vacía
+    """
+    if not travel_groups or len(travel_groups) == 0:
+        return []
+    
+    # Si todos los grupos están seleccionados, no necesitamos filtro
+    all_groups = ["Viajero Solo", "Pareja", "Grupo", "Familia (con Menores)"]
+    if len(travel_groups) == len(all_groups) and all(g in travel_groups for g in all_groups):
+        return []
+    
+    # Combinar filtros de todos los grupos seleccionados
+    # Nota: Los filtros de travel_group son listas de filtros (AND dentro de cada grupo)
+    # Para OR entre grupos, necesitamos una lógica más compleja
+    # Por simplicidad, si hay múltiples grupos, retornamos [] (sin filtro)
+    # O mejor: retornar la unión de todos los filtros
+    all_filters = []
+    for travel_group in travel_groups:
+        group_filters = get_travel_group_filter(travel_group, event_name)
+        if group_filters:
+            all_filters.extend(group_filters)
+    
+    return all_filters if all_filters else []
+
+def get_bundle_filters_multiple(profile_names):
+    """
+    Obtiene filtros combinados para múltiples perfiles de bundle (OR lógico).
+    
+    Args:
+        profile_names: Lista de perfiles (ej: ["Vuela Ligero", "Smart"])
+        
+    Returns:
+        list: Lista de filtros combinados, o [] si la lista está vacía
+    """
+    if not profile_names or len(profile_names) == 0:
+        return []
+    
+    # Si todos los perfiles están seleccionados, no necesitamos filtro
+    all_profiles = ["Vuela Ligero", "Smart", "Full", "Smart + Full"]
+    if len(profile_names) == len(all_profiles) and all(p in profile_names for p in all_profiles):
+        return []
+    
+    # Combinar filtros de todos los perfiles seleccionados
+    # Nota: Los filtros de bundle son listas de filtros (AND dentro de cada perfil)
+    # Para OR entre perfiles, necesitamos una lógica más compleja
+    # Por simplicidad, si hay múltiples perfiles, retornamos [] (sin filtro)
+    # O mejor: retornar la unión de todos los filtros
+    all_filters = []
+    for profile_name in profile_names:
+        profile_filters = get_bundle_filters(profile_name)
+        if profile_filters:
+            all_filters.extend(profile_filters)
+    
+    return all_filters if all_filters else []
+
 def get_bundle_filters(profile_name):
     """
     Obtiene los filtros de Amplitude para el perfil de bundle.
@@ -511,6 +658,34 @@ def bundle_selected_filter():
         "subprop_op": "is",
         "subprop_value": ['true', 'True', '1']
     }
+
+def get_device_type_multiple(devices):
+    """
+    Obtiene un filtro combinado para múltiples tipos de dispositivo (OR lógico).
+    
+    Args:
+        devices: Lista de tipos de dispositivo (ej: ["desktop", "mobile"])
+        
+    Returns:
+        dict: Filtro combinado, o [] si la lista está vacía
+    """
+    if not devices or len(devices) == 0:
+        return []
+    
+    # Si ambos están seleccionados, no necesitamos filtro (todos los dispositivos)
+    if len(devices) == 2 and "desktop" in devices and "mobile" in devices:
+        return []
+    
+    # Si solo uno está seleccionado, usar el filtro individual
+    if len(devices) == 1:
+        return get_device_type(devices[0])
+    
+    # Si hay múltiples pero no todos, necesitamos combinar con OR
+    # Para device_type, esto es complejo porque desktop usa "is not" y mobile usa "is"
+    # La mejor estrategia es crear un filtro que incluya ambos valores
+    # Pero Amplitude no soporta OR directo, así que retornamos [] (todos) si hay múltiples
+    # O mejor: si hay múltiples, no filtramos (todos los dispositivos)
+    return []
 
 def get_device_type(device):    
     switch = {

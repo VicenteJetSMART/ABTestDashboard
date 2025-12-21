@@ -16,14 +16,16 @@ SEAT_COUNT_PROPS = [
 ]
 
 # Propiedades de revenue para validar compra de asientos
-REVENUE_SEAT_TYPES = [
-    'seat_estandar_count',
-    'seat_primera_fila_count',
-    'seat_salida_emergencia_count',
-    'seat_salida_rapida_count',
-    'seat_smart_count',
-    'seats'  # Propiedad genérica de asientos en revenue
-]
+# NOTA: Comentado - Ya no se usa en SEATS_CR (eliminamos validación redundante del paso 3)
+# Se mantiene por referencia histórica y para otras métricas que puedan necesitarlo
+# REVENUE_SEAT_TYPES = [
+#     'seat_estandar_count',
+#     'seat_primera_fila_count',
+#     'seat_salida_emergencia_count',
+#     'seat_salida_rapida_count',
+#     'seat_smart_count',
+#     'seats'  # Propiedad genérica de asientos en revenue
+# ]
 
 
 def get_seat_count_filter():
@@ -62,6 +64,10 @@ def has_seat_purchase_filter():
     Usa las propiedades de revenue definidas en REVENUE_SEAT_TYPES.
     IMPORTANTE: Este filtro NO incluye filtros de segmento (Family, Business, etc.).
     Solo valida la compra técnica de asientos.
+    
+    NOTA: Este filtro ya NO se usa en SEATS_CR (eliminado para resolver bug de "0 ventas").
+    Se mantiene porque otras métricas CR (SEATS_DB_CR, SEATS_WITH_SELECTION_CR, etc.) aún lo usan.
+    Si esas métricas también presentan el mismo bug, considerar aplicar la misma solución.
     """
     # Usamos la propiedad 'seats' que representa el total de asientos vendidos en revenue
     return {
@@ -120,11 +126,13 @@ SEATS_WITH_BUNDLE_NSR = {'events': [
 # SOLUCIÓN: Funnel de 3 pasos donde:
 # - Paso 1 (seatmap_dom_loaded): ÚNICO que recibe filtros de segmento (Family, Business, etc.)
 # - Paso 2 (continue_clicked_seat): NO recibe filtros de segmento, solo valida seats_count > 0
-# - Paso 3 (revenue_amount): NO recibe filtros de segmento, solo valida que se pagó por asientos
+# - Paso 3 (revenue_amount): Sin filtro adicional - asumimos conversión válida por causalidad
+#   (si el usuario pasó por continue_clicked_seat con asientos y luego generó revenue, 
+#    asumimos que la venta incluye asientos)
 SEATS_CR = {'events': [
     ('seatmap_dom_loaded', []),  # 1. ANCHOR: Aquí "muerden" los filtros globales del Dashboard (Family, Business, etc.)
     ('continue_clicked_seat', [seats_count_filter()]),  # 2. BRIDGE: NO recibe filtros de segmento, solo valida que se seleccionaron asientos
-    ('revenue_amount', [has_seat_purchase_filter()])  # 3. GOAL: NO recibe filtros de segmento, solo valida que se pagó por asientos
+    ('revenue_amount', [])  # 3. GOAL: Sin filtro - asumimos conversión válida por causalidad
 ]}
 
 # Seats CR - DB (Misma estrategia Ghost Anchor con filtro DB en el ancla)

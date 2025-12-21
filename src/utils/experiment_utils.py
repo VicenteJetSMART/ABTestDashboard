@@ -13,7 +13,15 @@ import pandas as pd
 import requests
 from requests.auth import HTTPBasicAuth
 from datetime import datetime
-from src.utils.amplitude_filters import get_culture_digital_filter, get_device_type, get_flow_type_filter, get_bundle_filters, get_trip_type_filter, get_pax_adult_count_filter, get_travel_group_filter
+from src.utils.amplitude_filters import (
+    get_culture_digital_filter, get_culture_digital_filter_multiple,
+    get_device_type, get_device_type_multiple,
+    get_flow_type_filter, get_flow_type_filter_multiple,
+    get_bundle_filters, get_bundle_filters_multiple,
+    get_trip_type_filter, get_trip_type_filter_multiple,
+    get_pax_adult_count_filter,
+    get_travel_group_filter, get_travel_group_filter_multiple
+)
 import sys
 from io import StringIO
 
@@ -147,27 +155,44 @@ def get_funnel_data_experiment(api_key, secret_key, start_date, end_date, experi
 	# CRÍTICO: Estos filtros DEBEN estar presentes en TODOS los eventos para mantener el cohorte
 	segmentation_filters = []
 
-	# Comparación case-insensitive para evitar problemas con "ALL", "All", "all"
-	# CRÍTICO: Normalizar valores a minúsculas antes de pasarlos a las funciones de filtros
-	# porque get_device_type espera 'mobile' o 'desktop' en minúsculas
-	if culture and str(culture).upper() != "ALL":
-		culture_filter = get_culture_digital_filter(culture)
-		if culture_filter:  # Solo agregar si no está vacío (devuelve dict o "")
-			segmentation_filters.append(culture_filter)
-
-	if device and str(device).upper() != "ALL":
-		# Normalizar device a minúsculas porque get_device_type espera 'mobile' o 'desktop'
-		device_normalized = str(device).lower().strip()
-		device_filter = get_device_type(device_normalized)
-		# get_device_type devuelve dict si encuentra, [] si no encuentra
-		if device_filter and isinstance(device_filter, dict):  # Solo agregar si es un dict válido
-			segmentation_filters.append(device_filter)
-		elif device_filter == []:
-			# Si devuelve lista vacía, el valor no es reconocido
-			# Intentar con el valor original por si acaso
-			device_filter_alt = get_device_type(device)
-			if device_filter_alt and isinstance(device_filter_alt, dict):
-				segmentation_filters.append(device_filter_alt)
+	# Manejo de filtros con soporte para listas (multiselect)
+	# Si el valor es una lista, usar funciones _multiple; si es string, usar funciones individuales
+	# Lista vacía o "ALL" significa "sin filtro" (todos los valores)
+	
+	# Culture filter
+	if culture:
+		if isinstance(culture, list):
+			if len(culture) > 0:
+				culture_filter = get_culture_digital_filter_multiple(culture)
+				if culture_filter:  # Solo agregar si no está vacío
+					segmentation_filters.append(culture_filter)
+		else:
+			if str(culture).upper() != "ALL":
+				culture_filter = get_culture_digital_filter(culture)
+				if culture_filter:  # Solo agregar si no está vacío (devuelve dict o "")
+					segmentation_filters.append(culture_filter)
+	
+	# Device filter
+	if device:
+		if isinstance(device, list):
+			if len(device) > 0:
+				device_filter = get_device_type_multiple(device)
+				if device_filter and isinstance(device_filter, dict):  # Solo agregar si es un dict válido
+					segmentation_filters.append(device_filter)
+		else:
+			if str(device).upper() != "ALL":
+				# Normalizar device a minúsculas porque get_device_type espera 'mobile' o 'desktop'
+				device_normalized = str(device).lower().strip()
+				device_filter = get_device_type(device_normalized)
+				# get_device_type devuelve dict si encuentra, [] si no encuentra
+				if device_filter and isinstance(device_filter, dict):  # Solo agregar si es un dict válido
+					segmentation_filters.append(device_filter)
+				elif device_filter == []:
+					# Si devuelve lista vacía, el valor no es reconocido
+					# Intentar con el valor original por si acaso
+					device_filter_alt = get_device_type(device)
+					if device_filter_alt and isinstance(device_filter_alt, dict):
+						segmentation_filters.append(device_filter_alt)
 
 	# ============================================================
 	# CONSOLIDACIÓN: Construir lista unificada de TODOS los filtros globales
@@ -243,11 +268,17 @@ def get_funnel_data_experiment(api_key, secret_key, start_date, end_date, experi
 		is_strict_anchor = (idx == 0)
 		
 		# 1. TRAVEL GROUP: Solo aplicar en el primer paso
-		if travel_group and str(travel_group).upper() != "ALL":
-			if is_strict_anchor:
-				travel_group_filters = get_travel_group_filter(travel_group, event_name)
-				if travel_group_filters:
-					event_filters.extend(travel_group_filters)
+		if travel_group:
+			if isinstance(travel_group, list):
+				if len(travel_group) > 0 and is_strict_anchor:
+					travel_group_filters = get_travel_group_filter_multiple(travel_group, event_name)
+					if travel_group_filters:
+						event_filters.extend(travel_group_filters)
+			else:
+				if str(travel_group).upper() != "ALL" and is_strict_anchor:
+					travel_group_filters = get_travel_group_filter(travel_group, event_name)
+					if travel_group_filters:
+						event_filters.extend(travel_group_filters)
 		
 		# 2. PAX ADULT COUNT: Solo aplicar en el primer paso (compatibilidad hacia atrás)
 		elif pax_adult_count and str(pax_adult_count).upper() != "ALL" and not has_explicit_pax_filter:
@@ -257,25 +288,43 @@ def get_funnel_data_experiment(api_key, secret_key, start_date, end_date, experi
 					event_filters.append(pax_adult_count_filter)
 		
 		# 3. TRIP TYPE: Solo aplicar en el primer paso
-		if trip_type and str(trip_type).upper() != "ALL" and not has_explicit_trip_type_filter:
-			if is_strict_anchor:
-				trip_type_filter = get_trip_type_filter(trip_type)
-				if trip_type_filter:
-					event_filters.append(trip_type_filter)
+		if trip_type and not has_explicit_trip_type_filter:
+			if isinstance(trip_type, list):
+				if len(trip_type) > 0 and is_strict_anchor:
+					trip_type_filter = get_trip_type_filter_multiple(trip_type)
+					if trip_type_filter:
+						event_filters.append(trip_type_filter)
+			else:
+				if str(trip_type).upper() != "ALL" and is_strict_anchor:
+					trip_type_filter = get_trip_type_filter(trip_type)
+					if trip_type_filter:
+						event_filters.append(trip_type_filter)
 		
 		# 4. FLOW TYPE: Solo aplicar en el primer paso
-		if flow_type and str(flow_type).upper() != "ALL" and not has_explicit_flow_type_filter:
-			if is_strict_anchor:
-				flow_type_filter = get_flow_type_filter(flow_type)
-				if flow_type_filter:
-					event_filters.append(flow_type_filter)
+		if flow_type and not has_explicit_flow_type_filter:
+			if isinstance(flow_type, list):
+				if len(flow_type) > 0 and is_strict_anchor:
+					flow_type_filter = get_flow_type_filter_multiple(flow_type)
+					if flow_type_filter:
+						event_filters.append(flow_type_filter)
+			else:
+				if str(flow_type).upper() != "ALL" and is_strict_anchor:
+					flow_type_filter = get_flow_type_filter(flow_type)
+					if flow_type_filter:
+						event_filters.append(flow_type_filter)
 		
 		# 5. BUNDLE PROFILE: Solo aplicar en el primer paso
-		if bundle_profile and str(bundle_profile).upper() != "ALL" and not has_explicit_bundle_filter:
-			if is_strict_anchor:
-				bundle_filters = get_bundle_filters(bundle_profile)
-				if bundle_filters:
-					event_filters.extend(bundle_filters)
+		if bundle_profile and not has_explicit_bundle_filter:
+			if isinstance(bundle_profile, list):
+				if len(bundle_profile) > 0 and is_strict_anchor:
+					bundle_filters = get_bundle_filters_multiple(bundle_profile)
+					if bundle_filters:
+						event_filters.extend(bundle_filters)
+			else:
+				if str(bundle_profile).upper() != "ALL" and is_strict_anchor:
+					bundle_filters = get_bundle_filters(bundle_profile)
+					if bundle_filters:
+						event_filters.extend(bundle_filters)
 		
 		# PASO D: Agregar filtros específicos de la métrica si existen para este evento
 		# Estos filtros se agregan DESPUÉS de los globales, permitiendo que la métrica

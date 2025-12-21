@@ -413,47 +413,47 @@ def run_ui():
                     
                     # Filtros de análisis
                     with st.expander("⚙️ Filtros Avanzados", expanded=False):
-                        device_quick = st.selectbox(
+                        device_quick = st.multiselect(
                             "📱 Device",
-                            options=["ALL", "desktop", "mobile"],
-                            index=0,
+                            options=["desktop", "mobile"],
+                            default=[],
                             key="device_quick",
-                            help="Tipo de dispositivo a analizar"
+                            help="Tipo de dispositivo a analizar. Deja vacío para ver todos."
                         )
-                        culture_quick = st.selectbox(
+                        culture_quick = st.multiselect(
                             "🌍 Culture",
-                            options=["ALL", "CL", "AR", "PE", "CO", "BR", "UY", "PY", "EC", "US", "DO"],
-                            index=0,
+                            options=["CL", "AR", "PE", "CO", "BR", "UY", "PY", "EC", "US", "DO"],
+                            default=[],
                             key="culture_quick",
-                            help="Cultura/país a analizar"
+                            help="Cultura/país a analizar. Deja vacío para ver todos."
                         )
-                        flow_type_quick = st.selectbox(
+                        flow_type_quick = st.multiselect(
                             "🔄 Tipo de Flujo",
-                            options=["ALL", "DB", "PB", "CK"],
-                            index=0,
+                            options=["DB", "PB", "CK"],
+                            default=[],
                             key="flow_type_quick",
-                            help="Tipo de flujo a analizar"
+                            help="Tipo de flujo a analizar. Deja vacío para ver todos."
                         )
-                        bundle_profile_quick = st.selectbox(
+                        bundle_profile_quick = st.multiselect(
                             "✈️ Perfil de Vuelo",
-                            options=["ALL", "Vuela Ligero", "Smart", "Full", "Smart + Full"],
-                            index=0,
+                            options=["Vuela Ligero", "Smart", "Full", "Smart + Full"],
+                            default=[],
                             key="bundle_profile_quick",
-                            help="Perfil de bundle del usuario"
+                            help="Perfil de bundle del usuario. Deja vacío para ver todos."
                         )
-                        trip_type_quick = st.selectbox(
+                        trip_type_quick = st.multiselect(
                             "✈️ Tipo de Viaje",
-                            options=["ALL", "Solo Ida (One Way)", "Ida y Vuelta (Round Trip)"],
-                            index=0,
+                            options=["Solo Ida (One Way)", "Ida y Vuelta (Round Trip)"],
+                            default=[],
                             key="trip_type_quick",
-                            help="Tipo de viaje a analizar"
+                            help="Tipo de viaje a analizar. Deja vacío para ver todos."
                         )
-                        travel_group_quick = st.selectbox(
+                        travel_group_quick = st.multiselect(
                             "👥 Grupo de Viaje",
-                            options=["ALL", "Viajero Solo", "Pareja", "Grupo", "Familia (con Menores)"],
-                            index=0,
+                            options=["Viajero Solo", "Pareja", "Grupo", "Familia (con Menores)"],
+                            default=[],
                             key="travel_group_quick",
-                            help="Tipo de grupo de viaje"
+                            help="Tipo de grupo de viaje. Deja vacío para ver todos."
                         )
                         # Mapeo de Ventana de Conversión a Segundos (Amplitude requiere int)
                         conversion_window_options_quick = {
@@ -520,7 +520,7 @@ def run_ui():
                     selected_events_raw_quick = st.multiselect(
                         "Eventos Individuales:",
                         options=AVAILABLE_EVENTS,
-                        default=["homepage_dom_loaded"],
+                        default=[],
                         key="events_raw_quick_sidebar",
                         help="Eventos individuales"
                     )
@@ -750,12 +750,13 @@ def run_ui():
                     selected_row_original = st.session_state['selected_row_original']
                     selected_row = st.session_state['selected_row']
                     # Leer valores directamente de los widgets (que ya están en session_state automáticamente)
-                    device_quick = st.session_state.get('device_quick', 'ALL')
-                    culture_quick = st.session_state.get('culture_quick', 'ALL')
-                    flow_type_quick = st.session_state.get('flow_type_quick', 'ALL')
-                    bundle_profile_quick = st.session_state.get('bundle_profile_quick', 'ALL')
-                    trip_type_quick = st.session_state.get('trip_type_quick', 'ALL')
-                    travel_group_quick = st.session_state.get('travel_group_quick', 'ALL')
+                    # Los multiselect devuelven listas. Si está vacía, significa "ALL" (todos)
+                    device_quick = st.session_state.get('device_quick', [])
+                    culture_quick = st.session_state.get('culture_quick', [])
+                    flow_type_quick = st.session_state.get('flow_type_quick', [])
+                    bundle_profile_quick = st.session_state.get('bundle_profile_quick', [])
+                    trip_type_quick = st.session_state.get('trip_type_quick', [])
+                    travel_group_quick = st.session_state.get('travel_group_quick', [])
                     
                     # Obtener ventana de conversión (ya convertida a segundos en la sidebar)
                     # El widget guarda el string en 'conversion_window_quick', pero guardamos el entero en 'conversion_window_seconds'
@@ -880,27 +881,34 @@ def run_ui():
                                 st.session_state['analysis_experiment_name'] = selected_row.get('name', experiment_id_quick)
                                 
                                 # Guardar parámetros originales para el desglose
-                                # Normalizar valores "ALL" para consistencia (case-insensitive)
-                                def normalize_all_value(value):
-                                    """Normaliza valores 'ALL' a mayúsculas para consistencia.
-                                    Maneja None, strings, y otros tipos de forma segura."""
+                                # Normalizar valores para consistencia: listas vacías = "ALL"
+                                def normalize_filter_value(value):
+                                    """Normaliza valores de filtro para consistencia.
+                                    Si es una lista vacía o None, retorna "ALL".
+                                    Si es una lista con elementos, retorna la lista.
+                                    Si es un string "ALL", retorna "ALL".
+                                    """
                                     if value is None:
                                         return "ALL"
+                                    if isinstance(value, list):
+                                        if len(value) == 0:
+                                            return "ALL"
+                                        return value
                                     value_str = str(value).strip()
                                     if value_str.upper() == "ALL":
                                         return "ALL"
-                                    return value  # Retornar valor original (no normalizado a mayúsculas)
+                                    return value
                                 
                                 st.session_state['analysis_params'] = {
                                     'start_date': start_date_quick,
                                     'end_date': end_date_quick,
                                     'experiment_id': experiment_id_quick,
-                                    'device': normalize_all_value(device_quick),
-                                    'culture': normalize_all_value(culture_quick),
-                                    'flow_type': normalize_all_value(flow_type_quick),
-                                    'bundle_profile': normalize_all_value(bundle_profile_quick),
-                                    'trip_type': normalize_all_value(trip_type_quick),
-                                    'travel_group': normalize_all_value(travel_group_quick),
+                                    'device': normalize_filter_value(device_quick),
+                                    'culture': normalize_filter_value(culture_quick),
+                                    'flow_type': normalize_filter_value(flow_type_quick),
+                                    'bundle_profile': normalize_filter_value(bundle_profile_quick),
+                                    'trip_type': normalize_filter_value(trip_type_quick),
+                                    'travel_group': normalize_filter_value(travel_group_quick),
                                     'conversion_window': conversion_window_quick,
                                     'use_cumulative': use_cumulative
                                 }
@@ -971,10 +979,19 @@ def run_ui():
                                         df_metric_copy['Métrica'] = metric_name
                                         
                                         # Agregar columnas de filtro de contexto
-                                        df_metric_copy['Flow Type'] = flow_type_quick
-                                        df_metric_copy['Trip Type'] = trip_type_quick
-                                        df_metric_copy['Flight Profile'] = bundle_profile_quick
-                                        df_metric_copy['Travel Group'] = travel_group_quick
+                                        # Convertir listas a strings para mostrar en el DataFrame
+                                        def format_filter_value(value):
+                                            """Convierte valores de filtro a string para mostrar en DataFrame"""
+                                            if isinstance(value, list):
+                                                if len(value) == 0:
+                                                    return "ALL"
+                                                return ", ".join(str(v) for v in value)
+                                            return str(value) if value else "ALL"
+                                        
+                                        df_metric_copy['Flow Type'] = format_filter_value(flow_type_quick)
+                                        df_metric_copy['Trip Type'] = format_filter_value(trip_type_quick)
+                                        df_metric_copy['Flight Profile'] = format_filter_value(bundle_profile_quick)
+                                        df_metric_copy['Travel Group'] = format_filter_value(travel_group_quick)
                                         
                                         # Formatear fechas como strings si existen
                                         if use_cumulative:
