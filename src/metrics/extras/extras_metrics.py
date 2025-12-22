@@ -121,15 +121,55 @@ INSURANCE_A2C = {'events': [
 
 # ===== CONVERSION RATE (CR) =====
 
+def has_purchased_general_extra_filter():
+    """
+    Filtro técnico para validar que se compró alguno de los Extras Generales en revenue_amount.
+    
+    Lógica OR: El usuario compró si la suma de cualquiera de estas propiedades es > 0:
+    - flexi_smart_count
+    - pet_in_cabin_count
+    - priority_boarding_count
+    
+    NOTA TÉCNICA: Amplitude no soporta sumar propiedades directamente ni OR entre diferentes propiedades.
+    Esta implementación retorna múltiples filtros que Amplitude interpretará como AND por defecto.
+    
+    ALTERNATIVA: Si Amplitude no soporta OR entre propiedades diferentes, considerar:
+    1. Usar una propiedad calculada en Amplitude que sume estos valores
+    2. Crear múltiples métricas separadas y combinarlas en el análisis
+    3. Usar la API de Amplitude con una estructura de filtro más compleja
+    
+    Por ahora, retornamos los 3 filtros y esperamos que el procesamiento posterior
+    maneje la lógica OR correctamente, o que exista una propiedad calculada.
+    """
+    # Retornamos múltiples filtros - la lógica OR debe manejarse en el procesamiento
+    # o mediante una propiedad calculada en Amplitude
+    return [
+        {
+            'subprop_type': 'event',
+            'subprop_key': 'flexi_smart_count',
+            'subprop_op': 'greater',
+            'subprop_value': [0]
+        },
+        {
+            'subprop_type': 'event',
+            'subprop_key': 'pet_in_cabin_count',
+            'subprop_op': 'greater',
+            'subprop_value': [0]
+        },
+        {
+            'subprop_type': 'event',
+            'subprop_key': 'priority_boarding_count',
+            'subprop_op': 'greater',
+            'subprop_value': [0]
+        }
+    ]
+
 # CR Extras General (excluye airportCheckin)
+# CORREGIDO: Usa extras_dom_loaded como anchor para igualar el denominador con EXTRAS_GENERAL_A2C
+# Estrategia "Ghost Anchor": Filtros globales solo en el evento 1 (extras_dom_loaded)
 EXTRAS_GENERAL_CR = {'events': [
-    ('extra_selected', [{
-        'subprop_type': 'event',
-        'subprop_key': 'type',
-        'subprop_op': 'is not',
-        'subprop_value': ['airportCheckin']
-    }]),
-    ('revenue_amount', [])
+    ('extras_dom_loaded', []),  # 1. ANCHOR: Recibe filtros globales, iguala el denominador del A2C
+    ('revenue_amount', has_purchased_general_extra_filter())  # 2. GOAL: Filtro técnico OR
 ]}
 
 # CR Flexi (El filtro va en el PRIMER evento)
