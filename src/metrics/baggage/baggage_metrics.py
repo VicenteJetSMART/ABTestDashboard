@@ -102,23 +102,27 @@ ANCILLARY_MODAL_A2C = {'events': [
 # ===== CONVERSION RATE (CR) =====
 
 # CR Cabin Bag (El filtro va en el EVENTO FINAL usando propiedades nativas de revenue_amount)
-# NOTA: La propiedad se llama 'cabing_bag' (con 'g' extra) según el esquema real de Amplitude
+# CORREGIDO: Usa 'during_booking_baggage_count' que es la propiedad real en revenue_amount
+# TODO: Verificar si existe una propiedad específica para cabin (ej: 'cabin_bag_count' en revenue)
+#       Si existe, actualizar este filtro para mayor precisión
 CABIN_BAG_CR = {'events': [
     ('seatmap_dom_loaded', []),
     ('revenue_amount', [{
         'subprop_type': 'event',
-        'subprop_key': 'cabing_bag',
+        'subprop_key': 'during_booking_baggage_count',
         'subprop_op': 'greater',
         'subprop_value': [0]
     }])
 ]}
 
 # CR Checked Bag (El filtro va en el EVENTO FINAL usando propiedades nativas de revenue_amount)
+# CORREGIDO: Usa 'during_booking_baggage_count' que es la propiedad real en revenue_amount
+# (reemplaza la propiedad antigua 'checked_bag' que no existe en el esquema actual)
 CHECKED_BAG_CR = {'events': [
     ('seatmap_dom_loaded', []),
     ('revenue_amount', [{
         'subprop_type': 'event',
-        'subprop_key': 'checked_bag',
+        'subprop_key': 'during_booking_baggage_count',
         'subprop_op': 'greater',
         'subprop_value': [0]
     }])

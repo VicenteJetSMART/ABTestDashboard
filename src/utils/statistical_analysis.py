@@ -294,16 +294,47 @@ def prepare_variants_from_dataframe(df, initial_stage=None, final_stage=None):
             variant_df = df[df['Variant'] == variant].copy()
             
             # IMPORTANTE: Para TODAS las métricas de conversión (WCR, NSR, etc.):
-            # - n (denominador) = eventos en la etapa inicial (primer evento)
-            # - x (numerador) = eventos en la etapa final (último evento)
-            # Conversión = x/n = eventos_finales / eventos_iniciales
-            # Ejemplo WCR: revenue_amount / baggage_dom_loaded
-            # Ejemplo NSR: seatmap_dom_loaded / baggage_dom_loaded
-            initial_df = variant_df[variant_df['Funnel Stage'] == initial_stage]
-            n = int(initial_df['Event Count'].sum()) if not initial_df.empty else 0
+            # - n (denominador) = SESIONES ÚNICAS en la etapa inicial (primer evento)
+            # - x (numerador) = SESIONES ÚNICAS en la etapa final (último evento)
+            # Conversión = x/n = sesiones_únicas_finales / sesiones_únicas_iniciales
+            # 
+            # CORRECCIÓN CRÍTICA: Evitar sumar eventos diarios que duplican usuarios únicos
+            # - Si los datos son ACUMULADOS (de get_variant_funnel_cum): usar el valor directamente
+            # - Si los datos son DIARIOS (de get_variant_funnel): usar el último valor por fecha
+            # - Esto evita conversiones >100% causadas por contar eventos múltiples en lugar de sesiones únicas
+            # Ejemplo WCR: revenue_amount (sesiones únicas) / baggage_dom_loaded (sesiones únicas)
+            # Ejemplo NSR: seatmap_dom_loaded (sesiones únicas) / baggage_dom_loaded (sesiones únicas)
+            initial_df = variant_df[variant_df['Funnel Stage'] == initial_stage].copy()
+            if not initial_df.empty:
+                # Detectar si son datos acumulados (tienen Start Date/End Date) o diarios (tienen Date)
+                if 'Start Date' in initial_df.columns or 'End Date' in initial_df.columns:
+                    # Datos acumulados: usar el valor directamente (ya es acumulado único)
+                    n = int(initial_df['Event Count'].iloc[0])
+                elif 'Date' in initial_df.columns:
+                    # Datos diarios: usar el último valor (más reciente) que representa mejor el acumulado
+                    initial_df = initial_df.sort_values('Date')
+                    n = int(initial_df['Event Count'].iloc[-1])
+                else:
+                    # Fallback: usar máximo si no hay fecha
+                    n = int(initial_df['Event Count'].max())
+            else:
+                n = 0
             
-            final_df = variant_df[variant_df['Funnel Stage'] == final_stage]
-            x = int(final_df['Event Count'].sum()) if not final_df.empty else 0
+            final_df = variant_df[variant_df['Funnel Stage'] == final_stage].copy()
+            if not final_df.empty:
+                # Detectar si son datos acumulados (tienen Start Date/End Date) o diarios (tienen Date)
+                if 'Start Date' in final_df.columns or 'End Date' in final_df.columns:
+                    # Datos acumulados: usar el valor directamente (ya es acumulado único)
+                    x = int(final_df['Event Count'].iloc[0])
+                elif 'Date' in final_df.columns:
+                    # Datos diarios: usar el último valor (más reciente) que representa mejor el acumulado
+                    final_df = final_df.sort_values('Date')
+                    x = int(final_df['Event Count'].iloc[-1])
+                else:
+                    # Fallback: usar máximo si no hay fecha
+                    x = int(final_df['Event Count'].max())
+            else:
+                x = 0
             
             if n > 0:  # Solo incluir si hay datos en la etapa inicial
                 variants_dict[variant] = {

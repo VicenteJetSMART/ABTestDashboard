@@ -275,6 +275,33 @@ def load_env() -> tuple[bool, str]:
             )
 
 
+def safe_unique_from_column(series):
+    """
+    Extrae valores únicos de una serie de pandas que puede contener listas o strings.
+    
+    Args:
+        series: Serie de pandas que puede contener strings, listas, o ambos
+        
+    Returns:
+        list: Lista de valores únicos (strings)
+    """
+    unique_values = set()
+    
+    for value in series.dropna():
+        if isinstance(value, list):
+            # Si es una lista, agregar cada elemento
+            for item in value:
+                if item and str(item).strip().upper() not in ['ALL', 'N/A', '']:
+                    unique_values.add(str(item).strip())
+        else:
+            # Si es un string u otro tipo, convertir a string
+            value_str = str(value).strip()
+            if value_str and value_str.upper() not in ['ALL', 'N/A', '']:
+                unique_values.add(value_str)
+    
+    return sorted(list(unique_values))
+
+
 def run_ui():
     st.set_page_config(
         page_title="AB Test Dashboard",
@@ -1619,12 +1646,11 @@ def run_ui():
                                     # Método 1: Intentar obtener de los datos procesados (si tienen culturas específicas)
                                     for metric_key, df_analysis in available_metrics:
                                         if 'Culture' in df_analysis.columns:
-                                            # Obtener valores únicos y excluir 'ALL' y valores nulos
-                                            cultures_in_data = df_analysis['Culture'].dropna().unique().tolist()
+                                            # CORREGIDO: Usar función segura que maneja listas y strings
+                                            # Las columnas pueden contener listas ['CL', 'PE'] debido a multiselect
+                                            cultures_in_data = safe_unique_from_column(df_analysis['Culture'])
                                             for culture in cultures_in_data:
-                                                culture_str = str(culture).strip()
-                                                if culture_str and culture_str.upper() != 'ALL' and culture_str.upper() != 'N/A':
-                                                    all_cultures.add(culture_str)
+                                                all_cultures.add(culture)
                                     
                                     # Método 2: Si no encontramos culturas específicas (porque el análisis fue con 'ALL'),
                                     # hacer una consulta rápida para obtener las culturas disponibles
@@ -1656,11 +1682,10 @@ def run_ui():
                                                 
                                                 # Extraer culturas de la respuesta
                                                 if not test_df.empty and 'Culture' in test_df.columns:
-                                                    cultures_from_query = test_df['Culture'].dropna().unique().tolist()
+                                                    # CORREGIDO: Usar función segura que maneja listas y strings
+                                                    cultures_from_query = safe_unique_from_column(test_df['Culture'])
                                                     for culture in cultures_from_query:
-                                                        culture_str = str(culture).strip()
-                                                        if culture_str and culture_str.upper() != 'ALL' and culture_str.upper() != 'N/A':
-                                                            all_cultures.add(culture_str)
+                                                        all_cultures.add(culture)
                                         except Exception:
                                             # Si falla la consulta, continuar con el fallback
                                             pass

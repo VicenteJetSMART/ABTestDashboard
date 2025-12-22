@@ -150,9 +150,12 @@ def get_funnel_data_experiment(api_key, secret_key, start_date, end_date, experi
 	"""
 	url = 'https://amplitude.com/api/2/funnels'
 
-	# Construir filtros base de segmentación (siempre se aplican a todos los eventos)
-	# Estos son filtros globales que se aplican a todos los eventos del funnel
-	# CRÍTICO: Estos filtros DEBEN estar presentes en TODOS los eventos para mantener el cohorte
+	# Construir filtros base de segmentación (GLOBAL GHOST ANCHOR)
+	# ESTRATEGIA GLOBAL GHOST ANCHOR: Todos los filtros globales (Device, Culture, Flow Type, etc.)
+	# se aplican EXCLUSIVAMENTE al primer evento (índice 0). Los eventos siguientes (Steps/Goal)
+	# solo reciben filtros técnicos específicos de la métrica para evitar "ceros" en conversiones.
+	# Esto resuelve el problema sistémico donde revenue_amount y otros eventos finales no tienen
+	# propiedades de segmentación, causando que los filtros fallen y devuelvan 0 conversiones.
 	segmentation_filters = []
 
 	# Manejo de filtros con soporte para listas (multiselect)
@@ -195,10 +198,10 @@ def get_funnel_data_experiment(api_key, secret_key, start_date, end_date, experi
 						segmentation_filters.append(device_filter_alt)
 
 	# ============================================================
-	# CONSOLIDACIÓN: Construir lista unificada de TODOS los filtros globales
+	# CONSOLIDACIÓN: Construir lista unificada de filtros globales
 	# ============================================================
-	# CRÍTICO: Todos los filtros globales deben aplicarse a TODOS los eventos
-	# para garantizar la integridad del cohorte en todo el funnel
+	# NOTA: Estos filtros se aplicarán SOLO al evento 0 (Anchor) como parte
+	# de la estrategia Global Ghost Anchor para evitar "ceros" en conversiones
 	
 	# PASO B: Construir filtros contextuales (Flow Type, Bundle Profile, Trip Type, Pax Adult Count)
 	# Verificar primero si la métrica tiene filtros explícitos para evitar duplicados
@@ -225,8 +228,10 @@ def get_funnel_data_experiment(api_key, secret_key, start_date, end_date, experi
 							has_explicit_pax_filter = True
 	
 	# ============================================================
-	# CONSTRUCCIÓN DE EVENTOS: Aplicar TODOS los filtros a TODOS los eventos
-	# CON MAPEO DE PROPIEDADES SEGÚN EL TIPO DE EVENTO
+	# CONSTRUCCIÓN DE EVENTOS: ESTRATEGIA GLOBAL GHOST ANCHOR
+	# ============================================================
+	# Evento 0 (Anchor): Filtros globales + filtros técnicos de métrica
+	# Eventos > 0 (Steps/Goal): SOLO filtros técnicos de métrica
 	# ============================================================
 	event_filters_grouped = []
 	for idx, event in enumerate(event_list):
@@ -241,31 +246,30 @@ def get_funnel_data_experiment(api_key, secret_key, start_date, end_date, experi
 		else:
 			event_name = str(event)
 		
-		# PASO B: Agregar filtros de segmentación (Device, Culture)
-		# ESTRATEGIA GHOST ANCHOR: Los filtros de segmentación complejos (Travel Group, etc.)
-		# solo se aplican al primer evento (índice 0). Los filtros básicos (Device, Culture)
-		# se aplican a todos los eventos para mantener el cohorte.
-		# NOTA: Para eventos que no tienen propiedades de segmentación (ej: continue_clicked_seat),
-		# solo aplicamos Device y Culture, NO Travel Group u otros filtros complejos.
+		# PASO B: ESTRATEGIA GLOBAL GHOST ANCHOR
+		# ============================================================
+		# REGLA DE NEGOCIO: Aplicar filtros globales SOLO al Evento 0 (Anchor)
+		# ============================================================
+		# - Evento 0 (Anchor): Aplica TODOS los filtros globales (Device, Culture, Flow Type, etc.)
+		#                     + filtros técnicos específicos de la métrica
+		# - Eventos > 0 (Steps/Goal): IGNORA filtros globales, aplica SOLO filtros técnicos
+		#                             de la métrica (definidos en event_filters_map)
+		# ============================================================
+		# Esto resuelve el problema de "ceros" en métricas de conversión donde revenue_amount
+		# y otros eventos finales no tienen propiedades de segmentación.
+		# ============================================================
 		is_anchor_event = (idx == 0)
-		
-		# Device y Culture se aplican a todos los eventos (filtros básicos de cohorte)
-		event_filters.extend(segmentation_filters)
-		
-		# PASO C: Construir filtros contextuales con "Filtrado Estricto de Primer Paso"
-		# POLÍTICA: Los filtros de contexto de negocio se aplican EXCLUSIVAMENTE al primer evento (índice 0).
-		# Esto evita errores HTTP 400 y resultados vacíos en eventos intermedios o finales que no tienen
-		# las propiedades exactas. Confiamos 100% en la integridad del funnel: si el usuario calificó
-		# en el paso 1, cuenta para el resto.
-		
-		# ============================================================
-		# FILTRADO ESTRICTO DE PRIMER PASO (Strict Anchor Logic)
-		# ============================================================
-		# Solo el evento ancla (índice 0) lleva la carga de segmentación de negocio.
-		# Esto evita errores 400 en eventos intermedios (selected) o finales (revenue)
-		# que podrían no tener las propiedades exactas.
-		# ============================================================
 		is_strict_anchor = (idx == 0)
+		
+		# SOLO el evento 0 (Anchor) recibe filtros globales de segmentación
+		# Los eventos siguientes (Steps/Goal) NO reciben filtros globales para evitar "ceros"
+		if is_strict_anchor:
+			# Device y Culture se aplican SOLO al evento ancla
+			event_filters.extend(segmentation_filters)
+		
+		# PASO C: Construir filtros contextuales (Flow Type, Trip Type, Bundle, Travel Group)
+		# Estos filtros ya están configurados para aplicarse solo al evento 0 (is_strict_anchor)
+		# como parte de la estrategia Global Ghost Anchor
 		
 		# 1. TRAVEL GROUP: Solo aplicar en el primer paso
 		if travel_group:
@@ -326,9 +330,9 @@ def get_funnel_data_experiment(api_key, secret_key, start_date, end_date, experi
 					if bundle_filters:
 						event_filters.extend(bundle_filters)
 		
-		# PASO D: Agregar filtros específicos de la métrica si existen para este evento
-		# Estos filtros se agregan DESPUÉS de los globales, permitiendo que la métrica
-		# tenga filtros adicionales específicos sin perder los filtros globales
+		# PASO D: Agregar filtros técnicos específicos de la métrica si existen para este evento
+		# Estos filtros se aplican a TODOS los eventos (0 y > 0) como parte de la lógica de negocio
+		# de la métrica. Son filtros técnicos (ej: seats_count > 0) que validan condiciones específicas.
 		if event_filters_map and event_name in event_filters_map:
 			additional_filters = event_filters_map[event_name]
 			if additional_filters:
