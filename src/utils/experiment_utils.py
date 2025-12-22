@@ -421,15 +421,16 @@ def get_funnel_data_experiment(api_key, secret_key, start_date, end_date, experi
 			if culture and str(culture).upper() != "ALL" and not has_culture_filter:
 				debug_warnings.append(f"⚠️ Evento '{event_name}' NO tiene filtro de culture (esperado: {culture})")
 	
-	# Mostrar debug si hay advertencias o si está en modo debug
+	# Mostrar debug SOLO si el modo debug está activo (encapsulado en expander)
 	try:
 		import streamlit as st
-		show_debug = (
-			len(debug_warnings) > 0 or 
-			(hasattr(st, 'session_state') and st.session_state.get('debug_mode', False))
+		# Solo mostrar debug si el modo debug está explícitamente activo
+		debug_mode_active = (
+			hasattr(st, 'session_state') and 
+			st.session_state.get('debug_mode', False)
 		)
 		
-		if show_debug:
+		if debug_mode_active:
 			debug_info = {
 				'experiment_id': experiment_id,
 				'variant': variant,
@@ -464,15 +465,21 @@ def get_funnel_data_experiment(api_key, secret_key, start_date, end_date, experi
 					'filters': event_filters
 				})
 			
-			# Mostrar debug
-			with st.expander(f"🕵️ DEBUG PAYLOAD - Variant: {variant}", expanded=(len(debug_warnings) > 0)):
+			# Encapsular TODO el debug en un expander que solo se muestra si debug_mode está activo
+			with st.expander(f"🕵️ Ver Logs de Debug - Variant: {variant}", expanded=False):
 				if debug_warnings:
+					st.write("**⚠️ Advertencias:**")
 					for warning in debug_warnings:
 						st.warning(warning)
+					st.write("---")
+				
+				st.write("**📊 Información de Debug:**")
 				st.json(debug_info)
-				st.write("**Event Filters Grouped (JSON):**")
+				
+				st.write("**🔧 Event Filters Grouped (JSON):**")
 				st.json(event_filters_grouped)
-				st.write("**Params enviados a Amplitude (primeros 1000 chars):**")
+				
+				st.write("**📤 Params enviados a Amplitude (primeros 1000 chars):**")
 				params_str = json.dumps(params, indent=2)
 				st.text(params_str[:1000] + ("..." if len(params_str) > 1000 else ""))
 	except Exception:

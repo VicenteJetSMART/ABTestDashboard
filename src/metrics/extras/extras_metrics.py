@@ -53,10 +53,15 @@ MODAL_ANCILLARY_RATE = {'events': [
 
 # ===== ADD TO CART (A2C) =====
 
-# Add to Cart Extras General
+# Add to Cart Extras General (excluye airportCheckin)
 EXTRAS_GENERAL_A2C = {'events': [
     ('extras_dom_loaded', []),
-    ('extra_selected', [])
+    ('extra_selected', [{
+        'subprop_type': 'event',
+        'subprop_key': 'type',
+        'subprop_op': 'is not',
+        'subprop_value': ['airportCheckin']
+    }])
 ]}
 
 # Add to Cart Flexi (El filtro va en el SEGUNDO evento)
@@ -116,9 +121,14 @@ INSURANCE_A2C = {'events': [
 
 # ===== CONVERSION RATE (CR) =====
 
-# CR Extras General
+# CR Extras General (excluye airportCheckin)
 EXTRAS_GENERAL_CR = {'events': [
-    ('extra_selected', []),
+    ('extra_selected', [{
+        'subprop_type': 'event',
+        'subprop_key': 'type',
+        'subprop_op': 'is not',
+        'subprop_value': ['airportCheckin']
+    }]),
     ('revenue_amount', [])
 ]}
 

@@ -1713,8 +1713,10 @@ def run_ui():
                                         
                                         st.markdown(f"#### 📊 Desglose por {breakdown_selected} - {metric_display_name}")
                                         
-                                        # Importar create_metric_card si no está disponible
-                                        from src.utils.statistical_analysis import create_metric_card
+                                        # Importar funciones de renderizado
+                                        from src.utils.statistical_analysis import (
+                                            create_multivariant_card
+                                        )
                                         
                                         # Barra de progreso para el desglose
                                         breakdown_progress = st.progress(0)
@@ -1941,100 +1943,39 @@ def run_ui():
                                                     final_stage=final_stage
                                                 )
                                                 
-                                                if len(variants_segment) < 2:
+                                                # Filtrar variantes con datos válidos (n > 0)
+                                                variants_segment = [v for v in variants_segment if v.get('n', 0) > 0]
+                                                
+                                                if len(variants_segment) < 1:
                                                     continue
                                                 
-                                                # Calcular estadísticas para cada par de variantes y renderizar tarjeta
-                                                if len(variants_segment) == 2:
-                                                    control = variants_segment[0]
-                                                    treatment = variants_segment[1]
-                                                    
-                                                    # Validar que no haya división por cero
-                                                    if control['n'] == 0 or treatment['n'] == 0:
-                                                        continue
-                                                    
-                                                    results = calculate_ab_test(
-                                                        control['n'], control['x'],
-                                                        treatment['n'], treatment['x']
-                                                    )
-                                                    
-                                                    # Preparar datos para la tarjeta
-                                                    comparison_data = {
-                                                        'baseline': {
-                                                            'name': control['name'],
-                                                            'n': control['n'],
-                                                            'x': control['x']
-                                                        },
-                                                        'treatment': {
-                                                            'name': treatment['name'],
-                                                            'n': treatment['n'],
-                                                            'x': treatment['x']
-                                                        }
-                                                    }
-                                                    
-                                                    # Formato requerido: "Métrica - Segmento"
-                                                    # Ejemplo: "WCR Payment - Solo Ida (One Way)"
-                                                    metric_subtitle = f"{metric_display_name} - {segment_value}"
-                                                    
-                                                    # Renderizar tarjeta individual para este segmento
-                                                    # Header = Experimento, Sub-header = Métrica - Segmento
-                                                    create_metric_card(
-                                                        metric_name=metric_display_name,
-                                                        data=comparison_data,
-                                                        results=results,
-                                                        experiment_name=experiment_name_stat,
-                                                        metric_subtitle=metric_subtitle
-                                                    )
-                                                else:
-                                                    # Para múltiples variantes, comparar cada una con el control
-                                                    control = variants_segment[0]
-                                                    
-                                                    if control['n'] == 0:
-                                                        continue
-                                                    
-                                                    for treatment in variants_segment[1:]:
-                                                        if treatment['n'] == 0:
-                                                            continue
-                                                        
-                                                        results = calculate_ab_test(
-                                                            control['n'], control['x'],
-                                                            treatment['n'], treatment['x']
-                                                        )
-                                                        
-                                                        # Preparar datos para la tarjeta
-                                                        comparison_data = {
-                                                            'baseline': {
-                                                                'name': control['name'],
-                                                                'n': control['n'],
-                                                                'x': control['x']
-                                                            },
-                                                            'treatment': {
-                                                                'name': treatment['name'],
-                                                                'n': treatment['n'],
-                                                                'x': treatment['x']
-                                                            }
-                                                        }
-                                                        
-                                                        # Formato requerido: "Métrica - Segmento"
-                                                        # Ejemplo: "WCR Payment - Solo Ida (One Way)"
-                                                        metric_subtitle = f"{metric_display_name} - {segment_value}"
-                                                        
-                                                        # Renderizar tarjeta individual para este segmento y variante
-                                                        # Header = Experimento, Sub-header = Métrica - Segmento
-                                                        create_metric_card(
-                                                            metric_name=metric_display_name,
-                                                            data=comparison_data,
-                                                            results=results,
-                                                            experiment_name=experiment_name_stat,
-                                                            metric_subtitle=metric_subtitle
-                                                        )
+                                                # ============================================================
+                                                # NUEVA LÓGICA: UNA TARJETA POR SEGMENTO CON TABLA UNIFICADA
+                                                # ============================================================
+                                                # En lugar de crear una tarjeta por cada comparación,
+                                                # creamos UNA tarjeta por segmento que muestra TODAS las variantes
+                                                # en una tabla unificada (Control + Variantes)
+                                                
+                                                # Formato requerido: "Métrica - Segmento"
+                                                # Ejemplo: "WCR Payment - Solo Ida (One Way)"
+                                                metric_subtitle = f"{metric_display_name} - {segment_value}"
+                                                
+                                                # Renderizar tarjeta unificada con todas las variantes
+                                                # Usa create_multivariant_card que muestra Control + todas las Variantes
+                                                create_multivariant_card(
+                                                    metric_name=metric_display_name,
+                                                    variants=variants_segment,  # Lista completa: [Control, Var1, Var2, ...]
+                                                    experiment_name=experiment_name_stat,
+                                                    metric_subtitle=metric_subtitle,
+                                                    chi_square_result=None  # No calculamos chi-square global por segmento
+                                                )
                                             except Exception as e:
                                                 # Manejar errores silenciosamente para no romper el bucle
                                                 continue
                                         
                                         breakdown_progress.empty()
                                         
-                                        # Las tarjetas ya se renderizaron individualmente dentro del bucle
+                                        # Las tarjetas unificadas ya se renderizaron dentro del bucle (una por segmento)
                                         # Si no se renderizó ninguna tarjeta, mostrar mensaje informativo
                                         if total_segments == 0:
                                             st.info(f"ℹ️ No se encontraron segmentos para desglosar por '{breakdown_selected}' en la métrica '{metric_display_name}'.")
