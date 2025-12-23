@@ -148,6 +148,170 @@ def get_funnel_data_experiment(api_key, secret_key, start_date, end_date, experi
 	Returns:
 		dict: Respuesta JSON de la API de Amplitude con los datos del funnel
 	"""
+	# ============================================================
+	# COMPOSITE METRIC STRATEGY: EXTRAS_GENERAL_CR
+	# ============================================================
+	# Detectamos si esta es la métrica EXTRAS_GENERAL_CR que requiere
+	# lógica OR (suma de 3 sub-métricas: Flexi, Pet, Priority)
+	# Estructura esperada: extras_dom_loaded -> extra_selected (filtro) -> revenue_amount
+	is_extras_general_cr = False
+	if event_list and len(event_list) >= 3:
+		# Extraer nombres de eventos (puede venir como lista de strings o lista de tuplas)
+		first_event = event_list[0] if isinstance(event_list[0], str) else (event_list[0][0] if isinstance(event_list[0], tuple) else None)
+		second_event = event_list[1] if isinstance(event_list[1], str) else (event_list[1][0] if isinstance(event_list[1], tuple) else None)
+		third_event = event_list[2] if isinstance(event_list[2], str) else (event_list[2][0] if isinstance(event_list[2], tuple) else None)
+		
+		# Verificar estructura de EXTRAS_GENERAL_CR
+		if (first_event == 'extras_dom_loaded' and 
+		    second_event == 'extra_selected' and 
+		    third_event == 'revenue_amount'):
+			# Verificar que el filtro de extra_selected excluya airportCheckin
+			# Primero intentar desde event_filters_map (formato desde app.py)
+			second_event_filters = []
+			if event_filters_map and 'extra_selected' in event_filters_map:
+				second_event_filters = event_filters_map.get('extra_selected', [])
+			# Si no está en event_filters_map, intentar desde event_list (formato tupla)
+			elif isinstance(event_list[1], tuple) and len(event_list[1]) > 1:
+				second_event_filters = event_list[1][1] if isinstance(event_list[1][1], list) else [event_list[1][1]]
+			
+			# Buscar filtro que excluya airportCheckin
+			for filt in second_event_filters:
+				if isinstance(filt, dict):
+					if (filt.get('subprop_key') == 'type' and 
+					    filt.get('subprop_op') == 'is not' and 
+					    'airportCheckin' in filt.get('subprop_value', [])):
+						is_extras_general_cr = True
+						break
+	
+	# Si es EXTRAS_GENERAL_CR, usar estrategia de métrica compuesta
+	if is_extras_general_cr:
+		# Definir las 3 sub-métricas (Flexi, Pet, Priority)
+		sub_metrics = [
+			{
+				'name': 'flexi',
+				'event_list': [
+					('extras_dom_loaded', []),
+					('revenue_amount', [{
+						'subprop_type': 'event',
+						'subprop_key': 'flexi_smart_count',
+						'subprop_op': 'greater',
+						'subprop_value': [0]
+					}])
+				]
+			},
+			{
+				'name': 'pet',
+				'event_list': [
+					('extras_dom_loaded', []),
+					('revenue_amount', [{
+						'subprop_type': 'event',
+						'subprop_key': 'pet_in_cabin_count',
+						'subprop_op': 'greater',
+						'subprop_value': [0]
+					}])
+				]
+			},
+			{
+				'name': 'priority',
+				'event_list': [
+					('extras_dom_loaded', []),
+					('revenue_amount', [{
+						'subprop_type': 'event',
+						'subprop_key': 'priority_boarding_count',
+						'subprop_op': 'greater',
+						'subprop_value': [0]
+					}])
+				]
+			}
+		]
+		
+		# Ejecutar cada sub-métrica por separado
+		sub_results = []
+		for sub_metric in sub_metrics:
+			sub_event_list = sub_metric['event_list']
+			sub_event_filters_map = {}
+			
+			# Construir event_filters_map para esta sub-métrica
+			for event_item in sub_event_list:
+				if isinstance(event_item, tuple) and len(event_item) > 1:
+					event_name = event_item[0]
+					event_filters = event_item[1] if isinstance(event_item[1], list) else [event_item[1]]
+					if event_filters:
+						sub_event_filters_map[event_name] = event_filters
+			
+			# Llamar recursivamente a get_funnel_data_experiment para cada sub-métrica
+			sub_result = get_funnel_data_experiment(
+				api_key, secret_key, start_date, end_date, experiment_id,
+				device, variant, culture, sub_event_list,
+				conversion_window, sub_event_filters_map,
+				flow_type, bundle_profile, trip_type, pax_adult_count, travel_group, hidden_first_step
+			)
+			sub_results.append(sub_result)
+		
+		# Combinar resultados: sumar conversiones de las 3 sub-métricas
+		# La estructura de respuesta de Amplitude: data[0] = {dayFunnels: {series: [[val1, val2], ...], xValues: [dates]}, events: [...]}
+		combined_result = sub_results[0].copy() if sub_results else {}
+		
+		if 'data' in combined_result and sub_results and len(sub_results) > 0:
+			from collections import defaultdict
+			
+			# Obtener la primera sub-métrica como base para estructura
+			base_data = sub_results[0].get('data', [])
+			if not base_data:
+				return combined_result
+			
+			base_website = base_data[0] if isinstance(base_data, list) else base_data
+			base_events = base_website.get('events', [])
+			base_dates = base_website.get('dayFunnels', {}).get('xValues', [])
+			
+			# Inicializar estructura combinada
+			combined_series = defaultdict(lambda: defaultdict(int))  # {date_index: {step_index: value}}
+			
+			# Procesar cada sub-métrica
+			for sub_result in sub_results:
+				sub_data = sub_result.get('data', [])
+				if not sub_data:
+					continue
+				
+				sub_website = sub_data[0] if isinstance(sub_data, list) else sub_data
+				sub_series = sub_website.get('dayFunnels', {}).get('series', [])
+				sub_dates = sub_website.get('dayFunnels', {}).get('xValues', [])
+				
+				# Sumar valores por fecha y step
+				for date_idx, date_series in enumerate(sub_series):
+					if date_idx < len(sub_dates):
+						date_key = sub_dates[date_idx]
+						# Buscar índice de fecha en base_dates
+						if date_key in base_dates:
+							base_date_idx = base_dates.index(date_key)
+							for step_idx, step_value in enumerate(date_series):
+								# Solo sumar el último step (conversión)
+								if step_idx == len(date_series) - 1:
+									combined_series[base_date_idx][step_idx] += step_value
+								# Para el primer step (anchor), tomar el máximo (mismo denominador)
+								elif step_idx == 0:
+									combined_series[base_date_idx][step_idx] = max(
+										combined_series[base_date_idx][step_idx],
+										step_value
+									)
+			
+			# Reconstruir estructura combinada
+			combined_series_list = []
+			for date_idx in range(len(base_dates)):
+				date_series = []
+				for step_idx in range(len(base_events)):
+					value = combined_series[date_idx].get(step_idx, 0)
+					date_series.append(value)
+				combined_series_list.append(date_series)
+			
+			# Actualizar resultado combinado
+			combined_website = base_website.copy()
+			combined_website['dayFunnels']['series'] = combined_series_list
+			combined_result['data'] = [combined_website]
+		
+		return combined_result
+	
+	# Si no es EXTRAS_GENERAL_CR, continuar con el flujo normal
 	url = 'https://amplitude.com/api/2/funnels'
 
 	# Construir filtros base de segmentación (GLOBAL GHOST ANCHOR)
