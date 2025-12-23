@@ -121,6 +121,43 @@ INSURANCE_A2C = {'events': [
 
 # ===== CONVERSION RATE (CR) =====
 
+# Helper functions para filtros de revenue_amount (usando propiedades de revenue)
+def has_purchased_flexi_filter():
+    """
+    Retorna un filtro de Amplitude para validar compra de Flexi en revenue_amount.
+    Usa la propiedad flexi_smart_count > 0.
+    """
+    return {
+        'subprop_type': 'event',
+        'subprop_key': 'flexi_smart_count',
+        'subprop_op': 'greater',
+        'subprop_value': [0]
+    }
+
+def has_purchased_pet_filter():
+    """
+    Retorna un filtro de Amplitude para validar compra de Pet en revenue_amount.
+    Usa la propiedad pet_in_cabin_count > 0.
+    """
+    return {
+        'subprop_type': 'event',
+        'subprop_key': 'pet_in_cabin_count',
+        'subprop_op': 'greater',
+        'subprop_value': [0]
+    }
+
+def has_purchased_priority_filter():
+    """
+    Retorna un filtro de Amplitude para validar compra de Priority Boarding en revenue_amount.
+    Usa la propiedad priority_boarding_count > 0.
+    """
+    return {
+        'subprop_type': 'event',
+        'subprop_key': 'priority_boarding_count',
+        'subprop_op': 'greater',
+        'subprop_value': [0]
+    }
+
 # CR Extras General (excluye airportCheckin)
 # ARQUITECTURA DE 3 PASOS: Filtramos la intención en el paso intermedio
 # 1. ANCHOR: Define el denominador correcto (Sesiones en la página de extras)
@@ -137,15 +174,12 @@ EXTRAS_GENERAL_CR = {'events': [
     ('revenue_amount', [])  # 3. GOAL: Confirmación de pago (sin filtros adicionales)
 ]}
 
-# CR Flexi (El filtro va en el PRIMER evento)
+# CR Flexi
+# CORREGIDO: Usa extras_dom_loaded como anchor para igualar el denominador con FLEXI_A2C
+# Estrategia "Ghost Anchor": Filtros globales solo en el evento 1 (extras_dom_loaded)
 FLEXI_CR = {'events': [
-    ('extra_selected', [{
-        'subprop_type': 'event',
-        'subprop_key': 'type',
-        'subprop_op': 'is',
-        'subprop_value': ['flexiFee']
-    }]),
-    ('revenue_amount', [])
+    ('extras_dom_loaded', []),  # 1. ANCHOR: Recibe filtros globales, iguala el denominador del A2C
+    ('revenue_amount', [has_purchased_flexi_filter()])  # 2. GOAL: Filtro técnico en revenue_amount
 ]}
 
 # CR Airport Checkin (El filtro va en el PRIMER evento)
@@ -159,26 +193,20 @@ AIRPORT_CHECKIN_CR = {'events': [
     ('revenue_amount', [])
 ]}
 
-# CR Priority Boarding (El filtro va en el PRIMER evento)
+# CR Priority Boarding
+# CORREGIDO: Usa extras_dom_loaded como anchor para igualar el denominador con PRIORITY_BOARDING_A2C
+# Estrategia "Ghost Anchor": Filtros globales solo en el evento 1 (extras_dom_loaded)
 PRIORITY_BOARDING_CR = {'events': [
-    ('extra_selected', [{
-        'subprop_type': 'event',
-        'subprop_key': 'type',
-        'subprop_op': 'is',
-        'subprop_value': ['priorityBoarding']
-    }]),
-    ('revenue_amount', [])
+    ('extras_dom_loaded', []),  # 1. ANCHOR: Recibe filtros globales, iguala el denominador del A2C
+    ('revenue_amount', [has_purchased_priority_filter()])  # 2. GOAL: Filtro técnico en revenue_amount
 ]}
 
-# CR Pet (El filtro va en el PRIMER evento)
+# CR Pet
+# CORREGIDO: Usa extras_dom_loaded como anchor para igualar el denominador con PET_A2C
+# Estrategia "Ghost Anchor": Filtros globales solo en el evento 1 (extras_dom_loaded)
 PET_CR = {'events': [
-    ('extra_selected', [{
-        'subprop_type': 'event',
-        'subprop_key': 'type',
-        'subprop_op': 'is',
-        'subprop_value': ['pet']
-    }]),
-    ('revenue_amount', [])
+    ('extras_dom_loaded', []),  # 1. ANCHOR: Recibe filtros globales, iguala el denominador del A2C
+    ('revenue_amount', [has_purchased_pet_filter()])  # 2. GOAL: Filtro técnico en revenue_amount
 ]}
 
 # CR Insurance (El filtro va en el PRIMER evento)
