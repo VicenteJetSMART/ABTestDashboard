@@ -643,12 +643,12 @@ def create_multivariant_card(metric_name, variants, experiment_name=None, metric
     card_html = f"""<div id="result-card-{hash(metric_name)}" style="background: white; border-radius: 16px; margin: 20px auto; box-shadow: 0 8px 32px rgba(0,0,0,0.12); max-width: 1000px; width: 100%; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;"><style>.no-borders-table{{border:none!important;}}.no-borders-table th{{border:none!important;outline:none!important;}}.no-borders-table td{{border:none!important;outline:none!important;}}.no-borders-table tr{{border:none!important;outline:none!important;}}</style><div style="background: #00AEC7; padding: 12px 24px; display: flex; align-items: center; gap: 16px;"><div style="background: #1B365D; color: white; padding: 6px 15px; border-radius: 16px; font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; margin: 0; line-height: 1.2; display: flex; align-items: center; white-space: nowrap;">{badge_text}</div><div style="color: white; font-weight: 600; font-size: 18px; flex: 1; margin: 0; line-height: 1.2;">{subtitle_text}</div></div><table class="no-borders-table" style="width: 100%; border-collapse: collapse; border: none;"><thead><tr style="background: #F8FAFB;"><th style="padding: 18px 20px; text-align: left; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">Variante</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">Sesiones</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">Conversiones</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">% Conversión</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">P2BB</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">% Improvement</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">P-value</th></tr></thead><tbody>{table_rows}</tbody></table></div>"""
     
     # Resumen de significancia basado en el test Chi-cuadrado global
-    # Solo mostrar mensaje cuando hay test global (chi_square_result)
+    # Solo mostrar mensaje cuando hay test global (chi_square_result) Y hay diferencias significativas
     # Para comparaciones individuales, la significancia ya se muestra en la tabla (columna P-value)
     if chi_square_result is not None:
         is_globally_significant = chi_square_result.get('significant', False)
         if is_globally_significant:
-            # Hay diferencias significativas globalmente
+            # Hay diferencias significativas globalmente - mostrar alerta positiva
             significant_variants = [v['name'] for v in variants[1:] 
                                    if calculate_single_comparison(baseline, v)['significant']]
             if significant_variants:
@@ -656,8 +656,8 @@ def create_multivariant_card(metric_name, variants, experiment_name=None, metric
             else:
                 summary_html = '<div style="background: #E8F5E8; color: #2E7D32; padding: 16px 24px; border-radius: 12px; margin: 20px auto; max-width: 1000px; text-align: center; font-weight: 700; font-size: 15px; border: 2px solid #27AE60; box-shadow: 0 4px 12px rgba(46, 125, 50, 0.15); font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, sans-serif;">✅ Diferencias significativas detectadas globalmente</div>'
         else:
-            # No hay diferencias significativas globalmente - usar diseño similar a la cajita
-            summary_html = '<div style="background: white; color: #1B365D; padding: 16px 24px; border-radius: 12px; margin: 20px auto; max-width: 1000px; text-align: center; font-weight: 700; font-size: 15px; border: 2px solid #00AEC7; box-shadow: 0 4px 12px rgba(0, 174, 199, 0.15); font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, sans-serif;">⚠️ Sin diferencias significativas (p-value: {:.4f})</div>'.format(chi_square_result.get('p_value', 1.0))
+            # No hay diferencias significativas - NO mostrar mensaje (solo mostrar cuando hay significancia)
+            summary_html = ''
     else:
         # No hay test global - no mostrar mensaje de resumen
         # Las comparaciones individuales ya muestran su significancia en la tabla

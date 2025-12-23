@@ -1476,13 +1476,6 @@ def run_ui():
                                             # Análisis multivariante - usar diseño de tabla
                                             # Test Chi-cuadrado global
                                             chi_square_result = calculate_chi_square_test(variants)
-                                            with st.expander(f"Test Chi-cuadrado Global - {metric_display_name}", expanded=True):
-                                                st.markdown(f"""
-                                                **Test Chi-cuadrado:** {'✓ Significativo' if chi_square_result['significant'] else '✗ No significativo'} 
-                                                (p-value: {chi_square_result['p_value']:.4f}, χ²: {chi_square_result['chi2']:.2f})
-                                                
-                                                Este test evalúa si existe una diferencia significativa entre **todas** las variantes de forma global.
-                                                """)
                                             
                                             # Mostrar tarjeta multivariante: Header = Experimento, Sub-header = Métrica
                                             create_multivariant_card(
@@ -1557,13 +1550,6 @@ def run_ui():
                                 else:
                                     # Multivariante - usar diseño de tabla
                                     chi_square_result = calculate_chi_square_test(variants)
-                                    with st.expander(f"Test Chi-cuadrado Global - {metric_display_name}", expanded=True):
-                                        st.markdown(f"""
-                                        **Test Chi-cuadrado:** {'✓ Significativo' if chi_square_result['significant'] else '✗ No significativo'} 
-                                        (p-value: {chi_square_result['p_value']:.4f}, χ²: {chi_square_result['chi2']:.2f})
-                                        
-                                        Este test evalúa si existe una diferencia significativa entre **todas** las variantes de forma global.
-                                        """)
                                     
                                     # Mostrar tarjeta multivariante: Header = Experimento, Sub-header = Métrica
                                     create_multivariant_card(
