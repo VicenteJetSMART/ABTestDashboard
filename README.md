@@ -237,10 +237,10 @@ cd C:\Users\TuUsuario\Documentos
 Luego clona el repositorio:
 
 ```powershell
-git clone https://github.com/VicenteJetSMART/ABTestDashboard.git
+git clone https://github.com/crisrod14/AB-testing-analizador.git
 ```
 
-Esto creará una carpeta llamada `ABTestDashboard` con todo el código.
+Esto creará una carpeta llamada `AB-testing-analizador` con todo el código.
 
 #### Paso 3: Configurar el proyecto
 
