@@ -24,9 +24,14 @@ from src.utils.amplitude_filters import (
 )
 import sys
 from io import StringIO
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import hashlib
 
 # Variable global para almacenar logs
 _logs = []
+
+# Cache simple en memoria para requests a Amplitude (mejora velocidad)
+_amplitude_cache = {}
 
 def get_logs():
     """Obtiene y limpia los logs capturados"""
@@ -34,6 +39,28 @@ def get_logs():
     logs = _logs.copy()
     _logs = []  # Limpiar logs después de obtenerlos
     return logs
+
+
+def _generate_cache_key(*args, **kwargs):
+    """
+    Genera una clave única para el caché basada en los parámetros.
+    
+    Returns:
+        str: Hash MD5 de los parámetros
+    """
+    # Convertir todos los parámetros a string y crear un hash
+    key_str = json.dumps({
+        'args': str(args),
+        'kwargs': {k: str(v) for k, v in sorted(kwargs.items())}
+    }, sort_keys=True)
+    return hashlib.md5(key_str.encode()).hexdigest()
+
+
+def clear_amplitude_cache():
+    """Limpia el caché de Amplitude"""
+    global _amplitude_cache
+    _amplitude_cache = {}
+    return len(_amplitude_cache)
 
 
 def get_credentials():
@@ -125,6 +152,7 @@ def normalize_date_for_amplitude(date_input, default_time="00:00:00", is_end_dat
 def get_funnel_data_experiment(api_key, secret_key, start_date, end_date, experiment_id, device, variant, culture, event_list, conversion_window=1800, event_filters_map=None, flow_type="ALL", bundle_profile="ALL", trip_type="ALL", pax_adult_count="ALL", travel_group="ALL", hidden_first_step=False):
 	"""
 	Obtiene datos de funnel desde la API de Amplitude para un experimento específico.
+	OPTIMIZACIÓN: Incluye caché en memoria para evitar requests duplicadas.
 	
 	Args:
 		api_key: API key de Amplitude
@@ -148,6 +176,17 @@ def get_funnel_data_experiment(api_key, secret_key, start_date, end_date, experi
 	Returns:
 		dict: Respuesta JSON de la API de Amplitude con los datos del funnel
 	"""
+	# OPTIMIZACIÓN #2: Verificar caché antes de hacer request
+	global _amplitude_cache
+	cache_key = _generate_cache_key(
+		start_date, end_date, experiment_id, device, variant, culture,
+		event_list, conversion_window, event_filters_map, flow_type,
+		bundle_profile, trip_type, pax_adult_count, travel_group, hidden_first_step
+	)
+	
+	if cache_key in _amplitude_cache:
+		# Retornar resultado cacheado (sin hacer request a Amplitude)
+		return _amplitude_cache[cache_key]
 	# ============================================================
 	# COMPOSITE METRIC STRATEGY: EXTRAS_GENERAL_CR
 	# ============================================================
@@ -225,9 +264,9 @@ def get_funnel_data_experiment(api_key, secret_key, start_date, end_date, experi
 			}
 		]
 		
-		# Ejecutar cada sub-métrica por separado
-		sub_results = []
-		for sub_metric in sub_metrics:
+		# OPTIMIZACIÓN: Ejecutar las 3 sub-métricas en paralelo
+		def fetch_sub_metric(sub_metric):
+			"""Helper function para obtener una sub-métrica en paralelo"""
 			sub_event_list = sub_metric['event_list']
 			sub_event_filters_map = {}
 			
@@ -239,14 +278,37 @@ def get_funnel_data_experiment(api_key, secret_key, start_date, end_date, experi
 					if event_filters:
 						sub_event_filters_map[event_name] = event_filters
 			
-			# Llamar recursivamente a get_funnel_data_experiment para cada sub-métrica
-			sub_result = get_funnel_data_experiment(
+			# Llamar recursivamente a get_funnel_data_experiment para esta sub-métrica
+			return get_funnel_data_experiment(
 				api_key, secret_key, start_date, end_date, experiment_id,
 				device, variant, culture, sub_event_list,
 				conversion_window, sub_event_filters_map,
 				flow_type, bundle_profile, trip_type, pax_adult_count, travel_group, hidden_first_step
 			)
-			sub_results.append(sub_result)
+		
+		# Ejecutar las 3 sub-métricas en paralelo usando ThreadPoolExecutor
+		sub_results = []
+		with ThreadPoolExecutor(max_workers=3) as executor:
+			# Enviar todas las tareas en paralelo
+			future_to_metric = {executor.submit(fetch_sub_metric, sub_metric): sub_metric for sub_metric in sub_metrics}
+			
+			# Recopilar resultados a medida que completan (mantener orden)
+			sub_results_ordered = [None] * len(sub_metrics)
+			for future in as_completed(future_to_metric):
+				sub_metric = future_to_metric[future]
+				try:
+					sub_result = future.result()
+					# Mantener el orden original de las sub-métricas
+					metric_idx = sub_metrics.index(sub_metric)
+					sub_results_ordered[metric_idx] = sub_result
+				except Exception as e:
+					# Si una sub-métrica falla, agregar error en lugar de fallar todo
+					print(f"⚠️ Error obteniendo sub-métrica {sub_metric.get('name', 'unknown')}: {e}")
+					metric_idx = sub_metrics.index(sub_metric)
+					sub_results_ordered[metric_idx] = {'error': str(e)}
+			
+			# Filtrar None y usar resultados ordenados
+			sub_results = [r for r in sub_results_ordered if r is not None]
 		
 		# Combinar resultados: sumar conversiones de las 3 sub-métricas
 		# La estructura de respuesta de Amplitude: data[0] = {dayFunnels: {series: [[val1, val2], ...], xValues: [dates]}, events: [...]}
@@ -308,6 +370,9 @@ def get_funnel_data_experiment(api_key, secret_key, start_date, end_date, experi
 			combined_website = base_website.copy()
 			combined_website['dayFunnels']['series'] = combined_series_list
 			combined_result['data'] = [combined_website]
+		
+		# OPTIMIZACIÓN #2: Guardar resultado compuesto en caché
+		_amplitude_cache[cache_key] = combined_result
 		
 		return combined_result
 	
@@ -673,6 +738,9 @@ def get_funnel_data_experiment(api_key, secret_key, start_date, end_date, experi
 				f"Payload enviado: {json.dumps(params, indent=2)}\n"
 				f"Response (primeros 500 caracteres): {str(response_json)[:500]}"
 			)
+		
+		# OPTIMIZACIÓN #2: Guardar en caché antes de retornar
+		_amplitude_cache[cache_key] = response_json
 		
 		return response_json
 		
@@ -1393,11 +1461,12 @@ def get_all_variants_raw_data(
     # Obtener credenciales
     api_key, secret_key, _ = get_credentials()
     
-    all_variants_data = []
+    # OPTIMIZACIÓN #1: Paralelización de requests con ThreadPoolExecutor
+    # Hacer todas las requests a Amplitude en paralelo en lugar de secuencial
+    # Esto reduce el tiempo de espera de N×5seg a ~5seg (donde N es el número de variantes)
     
-    # Obtener datos para cada variante
-    for variant in variants:
-        
+    def fetch_variant_data(variant):
+        """Helper function para hacer request de una variante en paralelo"""
         variant_response = get_funnel_data_experiment(
             api_key,
             secret_key,
@@ -1418,16 +1487,38 @@ def get_all_variants_raw_data(
             hidden_first_step
         )
         
-        variant_data = {
+        return {
             'Data': variant_response,
             'ExperimentID': experiment_id,
             'Culture': culture,
             'Device': device,
             'Variant': variant
         }
-        
-        all_variants_data.append(variant_data)
     
+    # Ejecutar requests en paralelo usando ThreadPoolExecutor
+    # max_workers=10: Permite hasta 10 requests simultáneas (suficiente para la mayoría de experimentos)
+    all_variants_data = []
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        # Crear futures para cada variante
+        future_to_variant = {executor.submit(fetch_variant_data, variant): variant for variant in variants}
+        
+        # Recopilar resultados a medida que completan
+        for future in as_completed(future_to_variant):
+            variant = future_to_variant[future]
+            try:
+                variant_data = future.result()
+                all_variants_data.append(variant_data)
+            except Exception as e:
+                # Si una variante falla, agregar error en lugar de fallar todo
+                print(f"⚠️ Error obteniendo datos para variante {variant}: {e}")
+                # Agregar datos vacíos para no romper el análisis
+                all_variants_data.append({
+                    'Data': {'error': str(e)},
+                    'ExperimentID': experiment_id,
+                    'Culture': culture,
+                    'Device': device,
+                    'Variant': variant
+                })
     
     return all_variants_data
 

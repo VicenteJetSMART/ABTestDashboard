@@ -1,7 +1,9 @@
 import os
 import sys
+import re
 from pathlib import Path
 from io import BytesIO
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import streamlit as st
 import pandas as pd
@@ -14,7 +16,8 @@ from src.utils.experiment_utils import (
     get_control_treatment_raw_data,
     get_variant_funnel,
     get_variant_funnel_cum,
-    get_experiment_variants
+    get_experiment_variants,
+    clear_amplitude_cache
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -338,6 +341,17 @@ def run_ui():
                 st.markdown(env_message)
         
         st.caption("Las credenciales se leen desde .env en el raíz del proyecto.")
+        
+        st.markdown("---")
+        
+        # 🚀 OPTIMIZACIÓN: Botón para limpiar caché
+        st.subheader("🚀 Optimización")
+        if st.button("🗑️ Limpiar Caché de Amplitude"):
+            clear_amplitude_cache()
+            st.success("✅ Caché limpiado exitosamente")
+            st.info("El caché acelera las consultas repetidas. Límpialo si los datos parecen desactualizados.")
+        
+        st.markdown("---")
 
         use_cumulative = st.toggle(
             "📈 Usar acumulados (cumulativeRaw)",
@@ -449,10 +463,10 @@ def run_ui():
                         )
                         culture_quick = st.multiselect(
                             "🌍 Culture",
-                            options=["CL", "AR", "PE", "CO", "BR", "UY", "PY", "EC", "US", "DO"],
+                            options=["CL", "AR", "PE", "CO", "INTER"],
                             default=[],
                             key="culture_quick",
-                            help="Cultura/país a analizar. Deja vacío para ver todos."
+                            help="Cultura/país a analizar. INTER incluye: BR, UY, PY, EC, US, DO. Deja vacío para ver todos."
                         )
                         flow_type_quick = st.multiselect(
                             "🔄 Tipo de Flujo",
@@ -650,67 +664,6 @@ def run_ui():
     tab_experiments, tab_statistical, tab_help = st.tabs(["📋 Experimentos", "📊 Análisis Estadístico", "❓ Ayuda"])
 
     with tab_experiments:
-        st.subheader("🔍 Experimentos y Análisis")
-        st.caption("Explora todos los experimentos disponibles y ejecuta análisis directamente")
-
-        with st.spinner("Cargando experimentos..."):
-            try:
-                df_exp = get_experiments_list()
-
-                columns_to_show = ['name', 'key', 'state', 'startDate', 'endDate', 'createdAt', 'variants']
-                available_columns = [col for col in columns_to_show if col in df_exp.columns]
-                df_exp_filtered = df_exp[available_columns].copy()
-
-                date_columns = ['startDate', 'endDate', 'createdAt']
-                for col in date_columns:
-                    if col in df_exp_filtered.columns:
-                        df_exp_filtered[col] = pd.to_datetime(df_exp_filtered[col], errors='coerce')
-                        df_exp_filtered[col] = df_exp_filtered[col].dt.strftime('%Y-%m-%d')
-
-                # Procesar columna variants
-                if 'variants' in df_exp_filtered.columns:
-                    def process_variants(variant_obj):
-                        if variant_obj is None:
-                            return "N/A"
-                        try:
-                            if isinstance(variant_obj, float) and pd.isna(variant_obj):
-                                return "N/A"
-                            if isinstance(variant_obj, list):
-                                if not variant_obj:
-                                    return "N/A"
-                                names = []
-                                for v in variant_obj:
-                                    if isinstance(v, dict):
-                                        names.append(v.get('name', v.get('key', str(v))))
-                                    else:
-                                        names.append(str(v))
-                                return ", ".join(names)
-                            elif isinstance(variant_obj, dict):
-                                return variant_obj.get('name', variant_obj.get('key', str(variant_obj)))
-                            return str(variant_obj)
-                        except Exception:
-                            return str(variant_obj)
-
-                    df_exp_filtered['variants'] = df_exp_filtered['variants'].apply(process_variants)
-
-                # Métricas de resumen
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Total Experimentos", len(df_exp))
-                with col2:
-                    active_experiments = len(df_exp[df_exp['endDate'].isna()]) if 'endDate' in df_exp.columns else "N/A"
-                    st.metric("Experimentos Activos", active_experiments)
-                with col3:
-                    latest_exp = "N/A"
-                    if 'startDate' in df_exp.columns:
-                        start_dates = pd.to_datetime(df_exp['startDate'], errors='coerce')
-                        latest_date = start_dates.max()
-                        if pd.notna(latest_date):
-                            latest_exp = latest_date.strftime("%Y-%m-%d")
-                    st.metric("Último Experimento", latest_exp)
-
-                st.dataframe(df_exp_filtered, use_container_width=True)
-
                 # Mostrar información de métricas disponibles y botón de ejecutar si hay experimento seleccionado
                 if st.session_state.get('selected_row_sidebar') is not None:
                     selected_row_sidebar = st.session_state['selected_row_sidebar']
@@ -779,7 +732,26 @@ def run_ui():
                     # Leer valores directamente de los widgets (que ya están en session_state automáticamente)
                     # Los multiselect devuelven listas. Si está vacía, significa "ALL" (todos)
                     device_quick = st.session_state.get('device_quick', [])
-                    culture_quick = st.session_state.get('culture_quick', [])
+                    culture_quick_raw = st.session_state.get('culture_quick', [])
+                    # Expandir INTER a la lista de países
+                    def expand_inter_culture(value):
+                        """Expande 'INTER' en la lista de culture a los países que representa.
+                        INTER incluye: BR, UY, PY, EC, US, DO
+                        """
+                        if value is None:
+                            return value
+                        if isinstance(value, list):
+                            expanded = []
+                            for item in value:
+                                if item == 'INTER':
+                                    expanded.extend(['BR', 'UY', 'PY', 'EC', 'US', 'DO'])
+                                else:
+                                    expanded.append(item)
+                            return expanded if expanded else value
+                        if isinstance(value, str) and value == 'INTER':
+                            return ['BR', 'UY', 'PY', 'EC', 'US', 'DO']
+                        return value
+                    culture_quick = expand_inter_culture(culture_quick_raw)
                     flow_type_quick = st.session_state.get('flow_type_quick', [])
                     bundle_profile_quick = st.session_state.get('bundle_profile_quick', [])
                     trip_type_quick = st.session_state.get('trip_type_quick', [])
@@ -1101,42 +1073,6 @@ def run_ui():
                         # Si no hay métricas seleccionadas, mostrar mensaje
                         if st.session_state.get('run_analysis', False):
                             st.warning("⚠️ Por favor selecciona al menos una métrica o evento en la barra lateral")
-                            st.session_state['run_analysis'] = False
-                
-                # Botón de descarga para experimentos
-                col1, col2, col3 = st.columns([1, 1, 1])
-                with col2:
-                    # Crear buffer para Excel
-                    excel_buffer = BytesIO()
-                    df_exp_filtered.to_excel(excel_buffer, index=False, engine='openpyxl')
-                    excel_buffer.seek(0)
-                    
-                    st.download_button(
-                        label="📥 Descargar Lista de Experimentos",
-                        data=excel_buffer.getvalue(),
-                        file_name=f"experiments_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True
-                    )
-
-            except ValueError as e:
-                st.error(f"❌ Error de configuración o datos inválidos: {e}")
-                st.info("💡 **Sugerencias:**\n"
-                       "- Verifica que la variable de entorno `AMPLITUDE_MANAGEMENT_KEY` esté configurada correctamente\n"
-                       "- Asegúrate de que el archivo `.env` existe y contiene las credenciales necesarias\n"
-                       "- Revisa que la API key tenga los permisos necesarios para acceder a los experimentos")
-            except requests.exceptions.RequestException as e:
-                st.error(f"❌ Error de conexión con la API de Amplitude: {e}")
-                st.info("💡 **Sugerencias:**\n"
-                       "- Verifica tu conexión a internet\n"
-                       "- Comprueba que la URL de la API sea correcta\n"
-                       "- Revisa que no haya problemas de firewall o proxy")
-            except Exception as e:
-                st.error(f"❌ Error inesperado al listar experimentos: {e}")
-                st.exception(e)
-            
-            # Resetear el flag de ejecución después de procesar
-            if st.session_state.get('run_analysis', False):
                 st.session_state['run_analysis'] = False
 
     with tab_statistical:
@@ -1194,6 +1130,52 @@ def run_ui():
                         create_metric_card,
                         create_multivariant_card
                     )
+                    
+                    # Función auxiliar para ordenar variantes: control primero, luego variant-1, variant-2, etc.
+                    def sort_variants_correctly(variants_list, experiment_id):
+                        """Ordena las variantes: control primero, luego variant-1, variant-2, etc."""
+                        try:
+                            # Obtener el orden oficial de variantes del experimento
+                            ordered_variants = get_experiment_variants(experiment_id)
+                            # Crear diccionario para mapear orden
+                            variant_order = {name: idx for idx, name in enumerate(ordered_variants)}
+                            
+                            # Ordenar según el orden del experimento
+                            def get_sort_key(variant):
+                                name = variant.get('name', '')
+                                # Si la variante está en la lista del experimento, usar su índice
+                                if name in variant_order:
+                                    return variant_order[name]
+                                # Si no está, intentar ordenar por nombre (control primero, luego variant-1, variant-2)
+                                name_lower = name.lower()
+                                if name_lower == 'control':
+                                    return -1  # Control siempre primero
+                                elif name_lower.startswith('variant-'):
+                                    try:
+                                        # Extraer número: variant-1 -> 1, variant-2 -> 2, etc.
+                                        num_str = name_lower.replace('variant-', '').split('-')[0]
+                                        variant_num = int(re.match(r'^(\d+)', num_str).group(1))
+                                        return variant_num  # variant-1 = 1, variant-2 = 2, etc.
+                                    except (ValueError, AttributeError):
+                                        return 999
+                                return 9999  # Otros al final
+                            
+                            return sorted(variants_list, key=get_sort_key)
+                        except Exception:
+                            # Si falla, intentar ordenamiento simple por nombre
+                            def get_simple_sort_key(variant):
+                                name = variant.get('name', '').lower()
+                                if name == 'control':
+                                    return (0, '')
+                                elif name.startswith('variant-'):
+                                    try:
+                                        num_str = name.replace('variant-', '').split('-')[0]
+                                        variant_num = int(re.match(r'^(\d+)', num_str).group(1))
+                                        return (1, variant_num)
+                                    except (ValueError, AttributeError):
+                                        return (2, name)
+                                return (2, name)
+                            return sorted(variants_list, key=get_simple_sort_key)
                     
                     # Procesar cada métrica y mostrar en su propio recuadro
                     for metric_key, df_analysis in available_metrics:
@@ -1356,34 +1338,81 @@ def run_ui():
                                 # Excluir initial_stage para asegurar que sean diferentes
                                 final_stage = find_stage_by_event(event_names_for_stages[-1], available_stages, exclude_stage=initial_stage)
                                 
-                                # Si aún no se encuentran, usar orden alfabético como fallback
-                                # PERO asegurando que siempre sean diferentes
+                                # Si aún no se encuentran, usar FALLBACK INTELIGENTE que respeta el orden de la métrica
+                                # NO usar orden alfabético porque puede invertir los eventos
                                 if not initial_stage or not final_stage:
-                                    funnel_stages = sorted(available_stages)
+                                    # FALLBACK: Buscar por coincidencia parcial más agresiva
+                                    # Intentar encontrar stages que contengan palabras clave de los eventos
                                     
                                     if not initial_stage:
-                                        initial_stage = funnel_stages[0]
+                                        # Buscar stage que mejor coincida con el primer evento
+                                        first_event_lower = event_names_for_stages[0].lower()
+                                        best_match = None
+                                        best_score = 0
+                                        
+                                        for stage in available_stages:
+                                            stage_lower = stage.lower()
+                                            # Calcular score de coincidencia (palabras en común)
+                                            first_words = set(first_event_lower.replace('_', ' ').split())
+                                            stage_words = set(stage_lower.replace('_', ' ').split())
+                                            common_words = first_words.intersection(stage_words)
+                                            score = len(common_words)
+                                            
+                                            if score > best_score:
+                                                best_score = score
+                                                best_match = stage
+                                        
+                                        # Si encontramos alguna coincidencia, usarla; si no, usar el primer stage disponible
+                                        initial_stage = best_match if best_match else available_stages[0]
                                     
                                     if not final_stage:
-                                        # Buscar un stage diferente al initial_stage
-                                        for stage in funnel_stages:
+                                        # Buscar stage que mejor coincida con el último evento (excluyendo initial_stage)
+                                        last_event_lower = event_names_for_stages[-1].lower()
+                                        best_match = None
+                                        best_score = 0
+                                        
+                                        for stage in available_stages:
+                                            if stage == initial_stage:
+                                                continue
+                                            
+                                            stage_lower = stage.lower()
+                                            # Calcular score de coincidencia (palabras en común)
+                                            last_words = set(last_event_lower.replace('_', ' ').split())
+                                            stage_words = set(stage_lower.replace('_', ' ').split())
+                                            common_words = last_words.intersection(stage_words)
+                                            score = len(common_words)
+                                            
+                                            if score > best_score:
+                                                best_score = score
+                                                best_match = stage
+                                        
+                                        # Si encontramos alguna coincidencia, usarla
+                                        if best_match:
+                                            final_stage = best_match
+                                        else:
+                                            # Buscar cualquier stage diferente al initial_stage
+                                            for stage in available_stages:
+                                                if stage != initial_stage:
+                                                    final_stage = stage
+                                                    break
+                                            
+                                            # Si no hay otro stage, hay un problema
+                                            if not final_stage:
+                                                if len(available_stages) > 1:
+                                                    # Tomar el último disponible
+                                                    final_stage = available_stages[-1]
+                                                else:
+                                                    # Solo hay un stage disponible - no podemos hacer análisis
+                                                    initial_stage = None
+                                                    final_stage = None
+                                    
+                                    # Verificación final: asegurar que sean diferentes
+                                    if initial_stage and final_stage and initial_stage == final_stage and len(available_stages) > 1:
+                                        # Si son iguales pero hay más stages, buscar otro stage
+                                        for stage in available_stages:
                                             if stage != initial_stage:
                                                 final_stage = stage
                                                 break
-                                        # Si no hay otro stage, usar el último (que debería ser diferente si hay más de uno)
-                                        if not final_stage:
-                                            if len(funnel_stages) > 1:
-                                                final_stage = funnel_stages[-1]
-                                            else:
-                                                # Solo hay un stage disponible - no podemos hacer análisis
-                                                initial_stage = None
-                                                final_stage = None
-                                    
-                                    # Verificación final: asegurar que sean diferentes
-                                    if initial_stage == final_stage and len(funnel_stages) > 1:
-                                        # Si son iguales pero hay más stages, usar el primero y el último
-                                        initial_stage = funnel_stages[0]
-                                        final_stage = funnel_stages[-1]
                             else:
                                 # Fallback: usar orden alfabético inteligente (ignorando prefijos)
                                 # Normalizar nombres para ordenar (remover [Amplitude] y otros prefijos)
@@ -1445,6 +1474,9 @@ def run_ui():
                                         final_stage=final_stage
                                     )
                                     
+                                    # Ordenar variantes correctamente: control primero, luego variant-1, variant-2, etc.
+                                    variants = sort_variants_correctly(variants, experiment_id_stat)
+                                    
                                     if len(variants) >= 2:
                                         # Análisis según número de variantes
                                         if len(variants) == 2:
@@ -1472,6 +1504,7 @@ def run_ui():
                                                 metric_subtitle=metric_display_name
                                             )
                                             
+                                            
                                         else:
                                             # Análisis multivariante - usar diseño de tabla
                                             # Test Chi-cuadrado global
@@ -1485,6 +1518,7 @@ def run_ui():
                                                 metric_subtitle=metric_display_name,
                                                 chi_square_result=chi_square_result
                                             )
+                                            
                                     else:
                                         st.warning(f"⚠️ Se necesitan al menos 2 variantes para el análisis estadístico de '{metric_display_name}'. Se encontraron {len(variants)} variantes.")
                             else:
@@ -1523,6 +1557,9 @@ def run_ui():
                             
                             variants = prepare_variants_from_dataframe(df_analysis)
                             
+                            # Ordenar variantes correctamente: control primero, luego variant-1, variant-2, etc.
+                            variants = sort_variants_correctly(variants, experiment_id_stat)
+                            
                             if len(variants) >= 2:
                                 # Análisis
                                 if len(variants) == 2:
@@ -1547,6 +1584,7 @@ def run_ui():
                                         experiment_name=experiment_name_stat,
                                         metric_subtitle=metric_display_name
                                     )
+                                    
                                 else:
                                     # Multivariante - usar diseño de tabla
                                     chi_square_result = calculate_chi_square_test(variants)
@@ -1559,6 +1597,7 @@ def run_ui():
                                         metric_subtitle=metric_display_name,
                                         chi_square_result=chi_square_result
                                     )
+                                    
                             else:
                                 st.warning(f"⚠️ Se necesitan al menos 2 variantes para el análisis estadístico de '{metric_display_name}'")
                     
@@ -1677,13 +1716,22 @@ def run_ui():
                                             pass
                                     
                                     if all_cultures:
-                                        # Ordenar las culturas encontradas
-                                        segment_values = sorted(list(all_cultures))
+                                        # Agrupar países INTER (BR, UY, PY, EC, US, DO) bajo "INTER"
+                                        inter_countries = {'BR', 'UY', 'PY', 'EC', 'US', 'DO'}
+                                        main_countries = {'CL', 'AR', 'PE', 'CO'}
+                                        segment_values = []
+                                        
+                                        # Agregar países principales si existen
+                                        for country in ['CL', 'AR', 'PE', 'CO']:
+                                            if country in all_cultures:
+                                                segment_values.append(country)
+                                        
+                                        # Si existe al menos un país INTER, agregar "INTER"
+                                        if any(country in all_cultures for country in inter_countries):
+                                            segment_values.append('INTER')
                                     else:
-                                        # Fallback: usar la lista del selector (sin 'ALL')
-                                        # Esta lista viene del selector de Culture en la UI
-                                        culture_options_from_ui = ["CL", "AR", "PE", "CO", "BR", "UY", "PY", "EC", "US", "DO"]
-                                        segment_values = culture_options_from_ui
+                                        # Fallback: usar la lista del selector agrupando INTER
+                                        segment_values = ["CL", "AR", "PE", "CO", "INTER"]
                                 else:
                                     # Para otros desgloses, usar la lista predefinida
                                     segment_values = breakdown_values_map.get(breakdown_selected, [])
@@ -1704,73 +1752,56 @@ def run_ui():
                                             create_multivariant_card
                                         )
                                         
-                                        # Barra de progreso para el desglose
-                                        breakdown_progress = st.progress(0)
-                                        total_segments = len(segment_values)
-                                        
-                                        for idx, segment_value in enumerate(segment_values):
+                                        # OPTIMIZACIÓN #3: Paralelización de desgloses
+                                        # Función helper para procesar un segmento individual (ejecutada en paralelo)
+                                        def process_segment(segment_value):
+                                            """Procesa un segmento individual y retorna los datos para renderizar"""
                                             try:
-                                                breakdown_progress.progress((idx + 1) / total_segments)
-                                                
-                                                # ============================================================
-                                                # PASO 1: CAPTURA EXPLÍCITA DEL ESTADO GLOBAL
-                                                # ============================================================
                                                 # Función auxiliar para normalizar y obtener valores seguros
                                                 def get_safe_param(param_name, default_value):
-                                                    """Obtiene un parámetro de original_params con normalización y valor por defecto seguro."""
                                                     value = original_params.get(param_name, default_value)
                                                     if value is None:
                                                         return default_value
-                                                    # Normalizar "ALL" case-insensitive
                                                     if isinstance(value, str):
                                                         value_str = value.strip()
                                                         if value_str.upper() == "ALL":
                                                             return "ALL"
                                                     return value
                                                 
-                                                # Construir diccionario COMPLETO con TODOS los parámetros globales
-                                                # CRÍTICO: No confiar en valores por defecto de la función
+                                                # Construir parámetros de query
                                                 query_params = {
-                                                    # Parámetros obligatorios (sin defaults en la función)
                                                     'start_date': original_params.get('start_date'),
                                                     'end_date': original_params.get('end_date'),
                                                     'experiment_id': original_params.get('experiment_id'),
                                                     'event_list': metric_events,
-                                                    
-                                                    # Parámetros de filtros globales (con defaults explícitos)
-                                                    # Estos valores DEBEN venir de original_params, no de defaults de función
                                                     'device': get_safe_param('device', 'ALL'),
                                                     'culture': get_safe_param('culture', 'ALL'),
                                                     'flow_type': get_safe_param('flow_type', 'ALL'),
                                                     'bundle_profile': get_safe_param('bundle_profile', 'ALL'),
                                                     'trip_type': get_safe_param('trip_type', 'ALL'),
                                                     'travel_group': get_safe_param('travel_group', 'ALL'),
-                                                    
-                                                    # Parámetros opcionales con defaults explícitos
                                                     'conversion_window': original_params.get('conversion_window', 1800),
                                                     'event_filters_map': metric_filters if metric_filters else None
                                                 }
                                                 
-                                                # Agregar hidden_first_step si la métrica lo tiene
                                                 if metric_info.get('hidden_first_step', False):
                                                     query_params['hidden_first_step'] = True
                                                 
-                                                # Validar que los parámetros obligatorios no sean None
+                                                # Validar parámetros obligatorios
                                                 required_params = ['start_date', 'end_date', 'experiment_id', 'event_list']
                                                 missing_params = [p for p in required_params if query_params.get(p) is None]
                                                 if missing_params:
-                                                    st.warning(f"⚠️ Parámetros faltantes para segmento '{segment_value}': {missing_params}")
-                                                    continue
+                                                    return {'error': f"Parámetros faltantes: {missing_params}", 'segment': segment_value}
                                                 
-                                                # ============================================================
-                                                # PASO 2: SOBRESCRITURA QUIRÚRGICA DEL PARÁMETRO DEL SEGMENTO
-                                                # ============================================================
-                                                # Solo DESPUÉS de construir el diccionario completo,
-                                                # sobreescribir el parámetro específico del desglose
+                                                # Sobrescribir parámetro del segmento
                                                 if breakdown_selected == 'Device':
                                                     query_params['device'] = segment_value
                                                 elif breakdown_selected == 'Culture':
-                                                    query_params['culture'] = segment_value
+                                                    # Si el segment es "INTER", agrupar los países INTER
+                                                    if segment_value == 'INTER':
+                                                        query_params['culture'] = ['BR', 'UY', 'PY', 'EC', 'US', 'DO']
+                                                    else:
+                                                        query_params['culture'] = segment_value
                                                 elif breakdown_selected == 'Flow Type':
                                                     query_params['flow_type'] = segment_value
                                                 elif breakdown_selected == 'Trip Type':
@@ -1780,32 +1811,27 @@ def run_ui():
                                                 elif breakdown_selected == 'Travel Group':
                                                     query_params['travel_group'] = segment_value
                                                 
-                                                # ============================================================
-                                                # PASO 3: LLAMADA BLINDADA CON TODOS LOS PARÁMETROS EXPLÍCITOS
-                                                # ============================================================
-                                                # Pasar TODOS los parámetros explícitamente, sin depender de defaults
-                                                # Remover event_filters_map si es None (no pasarlo como None)
+                                                # Remover event_filters_map si es None
                                                 call_params = query_params.copy()
                                                 if call_params.get('event_filters_map') is None:
                                                     call_params.pop('event_filters_map', None)
                                                 
-                                                # Hacer llamada API para este segmento con parámetros explícitos
+                                                # Hacer llamada API
                                                 if use_cumulative_breakdown:
                                                     df_segment = final_pipeline_cumulative(**call_params)
                                                 else:
                                                     df_segment = final_pipeline(**call_params)
                                                 
                                                 if df_segment.empty:
-                                                    continue
+                                                    return {'error': 'DataFrame vacío', 'segment': segment_value}
                                                 
-                                                # Determinar initial_stage y final_stage
+                                                # Determinar initial_stage y final_stage (mismo código que antes)
                                                 initial_stage = None
                                                 final_stage = None
                                                 
                                                 if 'Funnel Stage' in df_segment.columns:
                                                     available_stages = df_segment['Funnel Stage'].unique().tolist()
                                                     
-                                                    # Intentar obtener configuración de la métrica
                                                     metric_config = None
                                                     try:
                                                         from src.utils.metrics_loader import get_all_metrics_flat
@@ -1814,11 +1840,8 @@ def run_ui():
                                                     except Exception:
                                                         pass
                                                     
-                                                    # Determinar stages
                                                     if metric_config and 'events' in metric_config and len(metric_config['events']) >= 2:
-                                                        # Verificar si esta métrica tiene hidden_first_step (Ghost Anchor)
                                                         hidden_first_step = metric_config.get('hidden_first_step', False)
-                                                        
                                                         event_names = []
                                                         for event_item in metric_config['events']:
                                                             if isinstance(event_item, tuple) and len(event_item) > 0:
@@ -1826,10 +1849,8 @@ def run_ui():
                                                             elif isinstance(event_item, str):
                                                                 event_names.append(event_item)
                                                         
-                                                        # Si hidden_first_step == True, filtrar el stage del evento ancla
                                                         if hidden_first_step and len(event_names) >= 2:
                                                             anchor_event_name = event_names[0]
-                                                            
                                                             def normalize_event_name_simple(name):
                                                                 name = name.replace('[Amplitude]', '').strip()
                                                                 if name.startswith('ce:'):
@@ -1839,20 +1860,12 @@ def run_ui():
                                                                         if end_paren != -1:
                                                                             name = name[end_paren + 1:].strip()
                                                                 return name.lower().strip()
-                                                            
-                                                            # Filtrar el stage del evento ancla
                                                             normalized_anchor = normalize_event_name_simple(anchor_event_name)
-                                                            available_stages = [
-                                                                stage for stage in available_stages
-                                                                if normalize_event_name_simple(stage) != normalized_anchor
-                                                            ]
-                                                            
+                                                            available_stages = [s for s in available_stages if normalize_event_name_simple(s) != normalized_anchor]
                                                             if not available_stages:
                                                                 available_stages = df_segment['Funnel Stage'].unique().tolist()
+                                                            event_names = event_names[1:]
                                                             
-                                                            event_names = event_names[1:]  # Recortar el primer evento
-                                                        
-                                                        # Función auxiliar para encontrar stage
                                                         def normalize_event_name_simple(name):
                                                             name = name.replace('[Amplitude]', '').strip()
                                                             if name.startswith('ce:'):
@@ -1883,28 +1896,58 @@ def run_ui():
                                                         initial_stage = find_stage_robust(event_names[0], available_stages) if event_names else None
                                                         final_stage = find_stage_robust(event_names[-1], available_stages, exclude_stage=initial_stage) if len(event_names) > 1 else None
                                                     
+                                                        # Fallback inteligente
                                                     if not initial_stage or not final_stage:
-                                                        sorted_stages = sorted(available_stages)
-                                                        initial_stage = sorted_stages[0] if sorted_stages else None
-                                                        final_stage = sorted_stages[-1] if len(sorted_stages) > 1 else sorted_stages[0] if sorted_stages else None
+                                                            if not initial_stage and event_names:
+                                                                first_event_lower = event_names[0].lower()
+                                                                best_match = None
+                                                                best_score = 0
+                                                                for stage in available_stages:
+                                                                    stage_lower = stage.lower()
+                                                                    first_words = set(first_event_lower.replace('_', ' ').split())
+                                                                    stage_words = set(stage_lower.replace('_', ' ').split())
+                                                                    common_words = first_words.intersection(stage_words)
+                                                                    score = len(common_words)
+                                                                    if score > best_score:
+                                                                        best_score = score
+                                                                        best_match = stage
+                                                                initial_stage = best_match if best_match else (available_stages[0] if available_stages else None)
+                                                            
+                                                            if not final_stage and event_names:
+                                                                last_event_lower = event_names[-1].lower()
+                                                                best_match = None
+                                                                best_score = 0
+                                                                for stage in available_stages:
+                                                                    if stage == initial_stage:
+                                                                        continue
+                                                                    stage_lower = stage.lower()
+                                                                    last_words = set(last_event_lower.replace('_', ' ').split())
+                                                                    stage_words = set(stage_lower.replace('_', ' ').split())
+                                                                    common_words = last_words.intersection(stage_words)
+                                                                    score = len(common_words)
+                                                                    if score > best_score:
+                                                                        best_score = score
+                                                                        best_match = stage
+                                                                if best_match:
+                                                                    final_stage = best_match
+                                                                else:
+                                                                    for stage in available_stages:
+                                                                        if stage != initial_stage:
+                                                                            final_stage = stage
+                                                                            break
                                                 
-                                                # Si no tenemos stages válidos, saltar este segmento
                                                 if not initial_stage or not final_stage or initial_stage == final_stage:
-                                                    continue
+                                                    return {'error': 'No se encontraron stages válidos', 'segment': segment_value}
                                                 
-                                                # Si hidden_first_step == True, filtrar el DataFrame para excluir el stage del evento ancla
+                                                # Filtrar DataFrame si hidden_first_step
                                                 df_segment_filtered = df_segment.copy()
                                                 if metric_config and metric_config.get('hidden_first_step', False):
-                                                    # Obtener el nombre del evento ancla (primer evento)
                                                     anchor_event_name = None
                                                     if 'events' in metric_config and metric_config['events']:
                                                         first_event = metric_config['events'][0]
                                                         anchor_event_name = first_event[0] if isinstance(first_event, tuple) else first_event
-                                                    
                                                     if anchor_event_name:
-                                                        # Función auxiliar para normalizar nombres de eventos
                                                         def normalize_event_name_for_filter_segment(name):
-                                                            """Normaliza el nombre del evento para comparación"""
                                                             name = name.replace('[Amplitude]', '').strip()
                                                             if name.startswith('ce:'):
                                                                 name = name[3:].strip()
@@ -1913,8 +1956,6 @@ def run_ui():
                                                                     if end_paren != -1:
                                                                         name = name[end_paren + 1:].strip()
                                                             return name.lower().strip()
-                                                        
-                                                        # Filtrar filas que corresponden al stage del evento ancla
                                                         normalized_anchor = normalize_event_name_for_filter_segment(anchor_event_name)
                                                         df_segment_filtered = df_segment_filtered[
                                                             df_segment_filtered['Funnel Stage'].apply(
@@ -1922,49 +1963,119 @@ def run_ui():
                                                             )
                                                         ]
                                                 
-                                                # Preparar variantes para este segmento usando el DataFrame filtrado
+                                                # Preparar variantes
+                                                from src.utils.statistical_analysis import prepare_variants_from_dataframe
                                                 variants_segment = prepare_variants_from_dataframe(
                                                     df_segment_filtered,
                                                     initial_stage=initial_stage,
                                                     final_stage=final_stage
                                                 )
                                                 
-                                                # Filtrar variantes con datos válidos (n > 0)
                                                 variants_segment = [v for v in variants_segment if v.get('n', 0) > 0]
                                                 
                                                 if len(variants_segment) < 1:
-                                                    continue
+                                                    return {'error': 'No hay variantes válidas', 'segment': segment_value}
                                                 
-                                                # ============================================================
-                                                # NUEVA LÓGICA: UNA TARJETA POR SEGMENTO CON TABLA UNIFICADA
-                                                # ============================================================
-                                                # En lugar de crear una tarjeta por cada comparación,
-                                                # creamos UNA tarjeta por segmento que muestra TODAS las variantes
-                                                # en una tabla unificada (Control + Variantes)
+                                                # Ordenar variantes
+                                                variants_segment = sort_variants_correctly(variants_segment, experiment_id_stat)
                                                 
-                                                # Formato requerido: "Métrica - Segmento"
-                                                # Ejemplo: "WCR Payment - Solo Ida (One Way)"
-                                                metric_subtitle = f"{metric_display_name} - {segment_value}"
-                                                
-                                                # Renderizar tarjeta unificada con todas las variantes
-                                                # Usa create_multivariant_card que muestra Control + todas las Variantes
-                                                create_multivariant_card(
-                                                    metric_name=metric_display_name,
-                                                    variants=variants_segment,  # Lista completa: [Control, Var1, Var2, ...]
-                                                    experiment_name=experiment_name_stat,
-                                                    metric_subtitle=metric_subtitle,
-                                                    chi_square_result=None  # No calculamos chi-square global por segmento
-                                                )
+                                                return {
+                                                    'segment': segment_value,
+                                                    'variants': variants_segment,
+                                                    'metric_subtitle': f"{metric_display_name} - {segment_value}"
+                                                }
                                             except Exception as e:
-                                                # Manejar errores silenciosamente para no romper el bucle
-                                                continue
+                                                return {'error': str(e), 'segment': segment_value}
+                                        
+                                        # OPTIMIZACIÓN #3: Ejecutar todos los segmentos en paralelo
+                                        breakdown_progress = st.progress(0)
+                                        total_segments = len(segment_values)
+                                        segment_results = []
+                                        
+                                        with ThreadPoolExecutor(max_workers=10) as executor:
+                                            # Enviar todas las tareas en paralelo
+                                            future_to_segment = {executor.submit(process_segment, segment_value): segment_value for segment_value in segment_values}
+                                            
+                                            # Recopilar resultados a medida que completan
+                                            completed = 0
+                                            for future in as_completed(future_to_segment):
+                                                completed += 1
+                                                breakdown_progress.progress(completed / total_segments)
+                                                
+                                                result = future.result()
+                                                if 'error' not in result:
+                                                    segment_results.append(result)
                                         
                                         breakdown_progress.empty()
                                         
-                                        # Las tarjetas unificadas ya se renderizaron dentro del bucle (una por segmento)
+                                        # Ordenar resultados según el tipo de desglose
+                                        if breakdown_selected == 'Device':
+                                            # Orden personalizado para Device: desktop, mobile
+                                            device_order = {'desktop': 0, 'mobile': 1}
+                                            segment_results.sort(key=lambda x: device_order.get(x.get('segment', ''), 999))
+                                        elif breakdown_selected == 'Culture':
+                                            # Orden personalizado para Culture: CL, AR, PE, CO, luego INTER
+                                            culture_order = {
+                                                'CL': 0,
+                                                'AR': 1,
+                                                'PE': 2,
+                                                'CO': 3,
+                                                'INTER': 4
+                                            }
+                                            segment_results.sort(key=lambda x: culture_order.get(x.get('segment', ''), 999))
+                                        elif breakdown_selected == 'Flow Type':
+                                            # Orden personalizado para Flow Type: DB, PB, CK
+                                            flow_type_order = {'DB': 0, 'PB': 1, 'CK': 2}
+                                            segment_results.sort(key=lambda x: flow_type_order.get(x.get('segment', ''), 999))
+                                        elif breakdown_selected == 'Trip Type':
+                                            # Orden personalizado para Trip Type: Solo Ida (One Way), Ida y Vuelta (Round Trip)
+                                            trip_type_order = {
+                                                'Solo Ida (One Way)': 0,
+                                                'Ida y Vuelta (Round Trip)': 1
+                                            }
+                                            segment_results.sort(key=lambda x: trip_type_order.get(x.get('segment', ''), 999))
+                                        elif breakdown_selected == 'Flight Profile':
+                                            # Orden personalizado para Flight Profile: Vuela Ligero, Smart, Full, Smart + Full
+                                            flight_profile_order = {
+                                                'Vuela Ligero': 0,
+                                                'Smart': 1,
+                                                'Full': 2,
+                                                'Smart + Full': 3
+                                            }
+                                            segment_results.sort(key=lambda x: flight_profile_order.get(x.get('segment', ''), 999))
+                                        elif breakdown_selected == 'Travel Group':
+                                            # Orden personalizado para Travel Group: Viajero Solo, Pareja, Grupo, Familia (con Menores)
+                                            travel_group_order = {
+                                                'Viajero Solo': 0,
+                                                'Pareja': 1,
+                                                'Grupo': 2,
+                                                'Familia (con Menores)': 3
+                                            }
+                                            segment_results.sort(key=lambda x: travel_group_order.get(x.get('segment', ''), 999))
+                                        else:
+                                            # Para otros desgloses, mantener el orden original (breakdown_values_map)
+                                            # Los resultados ya vienen en el orden correcto de segment_values
+                                            pass
+                                        
+                                        # Renderizar resultados (ya procesados en paralelo y ordenados)
+                                        for result in segment_results:
+                                            try:
+                                                # Renderizar tarjeta unificada con todas las variantes
+                                                create_multivariant_card(
+                                                    metric_name=metric_display_name,
+                                                    variants=result['variants'],
+                                                    experiment_name=experiment_name_stat,
+                                                    metric_subtitle=result['metric_subtitle'],
+                                                    chi_square_result=None
+                                                )
+                                                
+                                            except Exception as e:
+                                                # Manejar errores silenciosamente
+                                                continue
+                                        
                                         # Si no se renderizó ninguna tarjeta, mostrar mensaje informativo
-                                        if total_segments == 0:
-                                            st.info(f"ℹ️ No se encontraron segmentos para desglosar por '{breakdown_selected}' en la métrica '{metric_display_name}'.")
+                                        if len(segment_results) == 0:
+                                            st.info(f"ℹ️ No se encontraron segmentos válidos para desglosar por '{breakdown_selected}' en la métrica '{metric_display_name}'.")
                                     
                                     # Cerrar el bucle de métricas
 

@@ -78,6 +78,53 @@ def has_seat_purchase_filter():
     }
 
 
+# Filtros para validar compra de tipos específicos de asientos en revenue_amount
+def has_estandar_seat_filter():
+    """Filtro para validar que se compró al menos un asiento estándar"""
+    return {
+        'subprop_type': 'event',
+        'subprop_key': 'seat_estandar_count',
+        'subprop_op': 'greater',
+        'subprop_value': [0]
+    }
+
+def has_primera_fila_seat_filter():
+    """Filtro para validar que se compró al menos un asiento de primera fila"""
+    return {
+        'subprop_type': 'event',
+        'subprop_key': 'seat_primera_fila_count',
+        'subprop_op': 'greater',
+        'subprop_value': [0]
+    }
+
+def has_salida_emergencia_seat_filter():
+    """Filtro para validar que se compró al menos un asiento de salida de emergencia"""
+    return {
+        'subprop_type': 'event',
+        'subprop_key': 'seat_salida_emergencia_count',
+        'subprop_op': 'greater',
+        'subprop_value': [0]
+    }
+
+def has_salida_rapida_seat_filter():
+    """Filtro para validar que se compró al menos un asiento de salida rápida"""
+    return {
+        'subprop_type': 'event',
+        'subprop_key': 'seat_salida_rapida_count',
+        'subprop_op': 'greater',
+        'subprop_value': [0]
+    }
+
+def has_smart_seat_filter():
+    """Filtro para validar que se compró al menos un asiento smart"""
+    return {
+        'subprop_type': 'event',
+        'subprop_key': 'seat_smart_count',
+        'subprop_op': 'greater',
+        'subprop_value': [0]
+    }
+
+
 # ===== WEBSITE CONVERSION RATE (WCR) =====
 
 # Website Conversion Rate Seats - General
@@ -93,82 +140,63 @@ SEATS_WCR = {'events': [
 # el evento continue_clicked_seat devuelve 0 porque NO tiene la propiedad de segmento.
 # SOLUCIÓN: Funnel de 2 pasos donde:
 # - Paso 1 (seatmap_dom_loaded): ÚNICO que recibe filtros de segmento (Family, Business, etc.)
-# - Paso 2 (continue_clicked_seat): NO recibe filtros de segmento, solo valida seats_count > 0
+# - Paso 2 (continue_clicked_seat): NO recibe filtros de segmento ni filtros técnicos (sin filtro)
 SEATS_NSR = {'events': [
     ('seatmap_dom_loaded', []),  # 1. ANCHOR: Aquí "muerden" los filtros globales del Dashboard (Family, Business, etc.)
-    ('continue_clicked_seat', [seats_count_filter()])  # 2. TARGET: NO recibe filtros de segmento, solo valida que se seleccionaron asientos
+    ('continue_clicked_seat', [])  # 2. TARGET: NO recibe filtros de segmento ni filtros técnicos
 ]}
 
-# Next Step Rate Seats - DB
-SEATS_DB_NSR = {'events': [
-    ('seatmap_dom_loaded', [get_DB_filter()]),  # ANCHOR: Filtro DB + filtros globales
-    ('extras_dom_loaded', [get_DB_filter()])
-]}
-
-# Next Step Rate Seats - Con Asientos Seleccionados
-SEATS_WITH_SELECTION_NSR = {'events': [
-    ('seatmap_dom_loaded', []),  # ANCHOR: Recibe filtros globales
-    ('extras_dom_loaded', [seat_selected_filter()])  # TARGET: Solo filtro técnico
-]}
-
-# Next Step Rate Seats - Con Bundle
-SEATS_WITH_BUNDLE_NSR = {'events': [
-    ('seatmap_dom_loaded', []),  # ANCHOR: Recibe filtros globales
-    ('extras_dom_loaded', [bundle_selected_filter()])  # TARGET: Solo filtro técnico
-]}
 
 # ===== CONVERSION RATE (CR) - ESTRATEGIA GHOST ANCHOR =====
 
 # Seats CR - General (Estrategia Ghost Anchor con funnel de 3 pasos)
 # PROBLEMA RESUELTO: Al filtrar por segmentos (ej: "Travel Group = Familia"), 
-# los eventos continue_clicked_seat y revenue_amount devuelven 0 porque NO tienen 
+# los eventos continue_clicked_seat y payment_confirmation_loaded devuelven 0 porque NO tienen 
 # las propiedades de segmento.
 # SOLUCIÓN: Funnel de 3 pasos donde:
 # - Paso 1 (seatmap_dom_loaded): ÚNICO que recibe filtros de segmento (Family, Business, etc.)
 # - Paso 2 (continue_clicked_seat): NO recibe filtros de segmento, solo valida seats_count > 0
-# - Paso 3 (revenue_amount): Sin filtro adicional - asumimos conversión válida por causalidad
-#   (si el usuario pasó por continue_clicked_seat con asientos y luego generó revenue, 
-#    asumimos que la venta incluye asientos)
+# - Paso 3 (payment_confirmation_loaded): Confirma que llegó a la página de confirmación de pago (sin filtro adicional)
 SEATS_CR = {'events': [
     ('seatmap_dom_loaded', []),  # 1. ANCHOR: Aquí "muerden" los filtros globales del Dashboard (Family, Business, etc.)
-    ('continue_clicked_seat', [seats_count_filter()]),  # 2. BRIDGE: NO recibe filtros de segmento, solo valida que se seleccionaron asientos
-    ('revenue_amount', [])  # 3. GOAL: Sin filtro - asumimos conversión válida por causalidad
+    ('payment_confirmation_loaded', [has_seat_purchase_filter()])  # 3. GOAL: Confirma que llegó a la página de confirmación de pago
 ]}
 
-# Seats CR - DB (Misma estrategia Ghost Anchor con filtro DB en el ancla)
-SEATS_DB_CR = {'events': [
-    ('seatmap_dom_loaded', [get_DB_filter()]),  # ANCHOR: Filtro DB + filtros globales
-    ('continue_clicked_seat', [seats_count_filter()]),  # BRIDGE: Solo filtro técnico
-    ('revenue_amount', [has_seat_purchase_filter()])  # GOAL: Solo filtro técnico
+# Seats CR por tipo de asiento - Estrategia Ghost Anchor con funnel de 2 pasos
+# Cada métrica valida que se compró al menos un asiento del tipo específico en revenue_amount
+# - Paso 1 (seatmap_dom_loaded): ÚNICO que recibe filtros de segmento (Family, Business, etc.)
+# - Paso 2 (revenue_amount): Valida que se compró al menos un asiento del tipo específico
+
+# Seats CR - Estándar
+SEATS_ESTANDAR_CR = {'events': [
+    ('seatmap_dom_loaded', []),  # 1. ANCHOR: Recibe filtros globales
+    ('revenue_amount', [has_estandar_seat_filter()])  # 2. GOAL: Valida seat_estandar_count > 0
 ]}
 
-# Seats CR - Con Asientos Seleccionados (Estrategia Ghost Anchor)
-SEATS_WITH_SELECTION_CR = {'events': [
-    ('seatmap_dom_loaded', []),  # ANCHOR: Recibe filtros globales
-    ('continue_clicked_seat', [seats_count_filter()]),  # BRIDGE: Solo filtro técnico
-    ('revenue_amount', [has_seat_purchase_filter()])  # GOAL: Solo filtro técnico
+# Seats CR - Primera Fila
+SEATS_PRIMERA_FILA_CR = {'events': [
+    ('seatmap_dom_loaded', []),  # 1. ANCHOR: Recibe filtros globales
+    ('revenue_amount', [has_primera_fila_seat_filter()])  # 2. GOAL: Valida seat_primera_fila_count > 0
 ]}
 
-# Seats CR - Con Bundle (Estrategia Ghost Anchor)
-SEATS_WITH_BUNDLE_CR = {'events': [
-    ('seatmap_dom_loaded', []),  # ANCHOR: Recibe filtros globales
-    ('continue_clicked_seat', [seats_count_filter()]),  # BRIDGE: Solo filtro técnico
-    ('revenue_amount', [has_seat_purchase_filter()])  # GOAL: Solo filtro técnico
+# Seats CR - Salida de Emergencia
+SEATS_SALIDA_EMERGENCIA_CR = {'events': [
+    ('seatmap_dom_loaded', []),  # 1. ANCHOR: Recibe filtros globales
+    ('revenue_amount', [has_salida_emergencia_seat_filter()])  # 2. GOAL: Valida seat_salida_emergencia_count > 0
 ]}
 
-# CR Outbound Seat (Estrategia Ghost Anchor)
-OUTBOUND_SEAT_CR = {'events': [
-    ('outbound_seat_selected', []),  # ANCHOR: Evento de selección
-    ('continue_clicked_seat', [seats_count_filter()]),  # BRIDGE: Validar que continuaron con asientos
-    ('revenue_amount', [has_seat_purchase_filter()])  # GOAL: Validar compra
+# Seats CR - Salida Rápida
+SEATS_SALIDA_RAPIDA_CR = {'events': [
+    ('seatmap_dom_loaded', []),  # 1. ANCHOR: Recibe filtros globales
+    ('revenue_amount', [has_salida_rapida_seat_filter()])  # 2. GOAL: Valida seat_salida_rapida_count > 0
 ]}
 
-# CR Inbound Seat (Estrategia Ghost Anchor)
-INBOUND_SEAT_CR = {'events': [
-    ('inbound_seat_selected', []),  # ANCHOR: Evento de selección
-    ('continue_clicked_seat', [seats_count_filter()]),  # BRIDGE: Validar que continuaron con asientos
-    ('revenue_amount', [has_seat_purchase_filter()])  # GOAL: Validar compra
+# Seats CR - Smart
+SEATS_SMART_CR = {'events': [
+    ('seatmap_dom_loaded', []),  # 1. ANCHOR: Recibe filtros globales
+    ('revenue_amount', [has_smart_seat_filter()])  # 2. GOAL: Valida seat_smart_count > 0
 ]}
+
 
 # ===== ADD TO CART (A2C) - ESTRATEGIA GHOST ANCHOR =====
 
@@ -183,40 +211,3 @@ SEATS_A2C = {'events': [
     ('continue_clicked_seat', [seats_count_filter()])  # 2. TARGET: NO recibe filtros de segmento, solo valida que se seleccionaron asientos
 ]}
 
-# Seats A2C - DB (Estrategia Ghost Anchor)
-SEATS_DB_A2C = {'events': [
-    ('seatmap_dom_loaded', [get_DB_filter()]),  # ANCHOR: Filtro DB + filtros globales
-    ('continue_clicked_seat', [seats_count_filter()])  # TARGET: NO recibe filtros de segmento, solo filtro técnico
-]}
-
-# Seats A2C - Outbound (Selección de asiento de ida)
-SEATS_OUTBOUND_A2C = {'events': [
-    ('seatmap_dom_loaded', []),
-    ('outbound_seat_selected', [])
-]}
-
-# Seats A2C - Inbound (Selección de asiento de regreso)
-SEATS_INBOUND_A2C = {'events': [
-    ('outbound_seat_selected', []),
-    ('inbound_seat_selected', [])
-]}
-
-# Add to Cart Outbound Seat
-OUTBOUND_SEAT_A2C = {'events': [
-    ('seatmap_dom_loaded', []),
-    ('outbound_seat_selected', [])
-]}
-
-# Add to Cart Inbound Seat
-INBOUND_SEAT_A2C = {'events': [
-    ('seatmap_dom_loaded', []),
-    ('inbound_seat_selected', [])
-]}
-
-# ===== SELECTION RATE =====
-
-# Seat Selection Rate (cualquier asiento)
-SEAT_SELECTION_RATE = {'events': [
-    ('seatmap_dom_loaded', []),
-    ('seatmap_dom_loaded', [seat_selected_filter()])
-]}
