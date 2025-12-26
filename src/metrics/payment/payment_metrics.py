@@ -1,7 +1,4 @@
 # filtros amplitude
-from src.utils.amplitude_filters import (
-    get_DB_filter
-)
 
 # ===== NEXT STEP RATE (NSR) =====
 
@@ -11,24 +8,12 @@ PAYMENT_NSR = {'events': [
     ('revenue_amount', [])
 ]}
 
-# Next Step Rate Payment - DB
-PAYMENT_DB_NSR = {'events': [
-    ('payment_dom_loaded', [get_DB_filter()]),
-    ('revenue_amount', [get_DB_filter()])
-]}
-
 # ===== WEBSITE CONVERSION RATE (WCR) =====
 
 # Website Conversion Rate from Payment - General
 PAYMENT_WCR = {'events': [
     ('payment_dom_loaded', []),
     ('revenue_amount', [])
-]}
-
-# Website Conversion Rate from Payment - DB
-PAYMENT_DB_WCR = {'events': [
-    ('payment_dom_loaded', [get_DB_filter()]),
-    ('revenue_amount', [get_DB_filter()])
 ]}
 
 # ===== SELECTION RATE =====
@@ -61,12 +46,4 @@ SKIP_DIRECT_PAYMENT_RATE = {'events': [
 TOGGLE_TAXES_RATE = {'events': [
     ('payment_dom_loaded', []),
     ('click_toggle_taxes', [])
-]}
-
-# ===== PAYMENT TO REVENUE (MANTENER EXACTO) =====
-
-# Payment to Revenue (Final Conversion)
-PAYMENT_TO_REVENUE = {'events': [
-    ('payment_dom_loaded', []),
-    ('revenue_amount', [])
 ]}

@@ -328,43 +328,18 @@ def run_ui():
 
     # Sidebar con configuración básica
     with st.sidebar:
-        st.header("⚙️ Configuración")
+        # ============================================================
+        # SECCIÓN DE CONFIGURACIÓN DE ANÁLISIS
+        # ============================================================
+        st.subheader("🔍 Configuración de Análisis")
         
-        # Mostrar estado de carga de variables de entorno
-        if env_success:
-            st.success("✅ Variables de entorno cargadas")
-            with st.expander("ℹ️ Ver detalles"):
-                st.text(env_message)
-        else:
-            st.error("❌ Error cargando variables de entorno")
-            with st.expander("⚠️ Ver instrucciones", expanded=True):
-                st.markdown(env_message)
-        
-        st.caption("Las credenciales se leen desde .env en el raíz del proyecto.")
-        
-        st.markdown("---")
-        
-        # 🚀 OPTIMIZACIÓN: Botón para limpiar caché
-        st.subheader("🚀 Optimización")
-        if st.button("🗑️ Limpiar Caché de Amplitude"):
-            clear_amplitude_cache()
-            st.success("✅ Caché limpiado exitosamente")
-            st.info("El caché acelera las consultas repetidas. Límpialo si los datos parecen desactualizados.")
-        
-        st.markdown("---")
-
         use_cumulative = st.toggle(
             "📈 Usar acumulados (cumulativeRaw)",
             value=True,
             help="Si está activado, retorna una fila por métrica con valores acumulados"
         )
-
+        
         st.divider()
-
-        # ============================================================
-        # SECCIÓN DE CONFIGURACIÓN DE ANÁLISIS
-        # ============================================================
-        st.subheader("🔍 Configuración de Análisis")
         
         # Cargar experimentos para la sidebar
         with st.spinner("Cargando experimentos..."):
@@ -650,6 +625,39 @@ def run_ui():
                 btn_run_quick = False
                 selected_metrics_quick = []
                 selected_events_raw_quick = []
+        
+        st.divider()
+        
+        # ============================================================
+        # SECCIÓN DE CONFIGURACIÓN (Variables de entorno)
+        # ============================================================
+        st.header("⚙️ Configuración")
+        
+        # Mostrar estado de carga de variables de entorno
+        if env_success:
+            st.success("✅ Variables de entorno cargadas")
+            with st.expander("ℹ️ Ver detalles"):
+                st.text(env_message)
+        else:
+            st.error("❌ Error cargando variables de entorno")
+            with st.expander("⚠️ Ver instrucciones", expanded=True):
+                st.markdown(env_message)
+        
+        st.caption("Las credenciales se leen desde .env en el raíz del proyecto.")
+        
+        st.markdown("---")
+        
+        # ============================================================
+        # SECCIÓN DE OPTIMIZACIÓN
+        # ============================================================
+        # 🚀 OPTIMIZACIÓN: Botón para limpiar caché
+        st.subheader("🚀 Optimización")
+        if st.button("🗑️ Limpiar Caché de Amplitude"):
+            clear_amplitude_cache()
+            st.success("✅ Caché limpiado exitosamente")
+            st.info("El caché acelera las consultas repetidas. Límpialo si los datos parecen desactualizados.")
+        
+        st.markdown("---")
         
         st.divider()
         
@@ -1747,9 +1755,19 @@ def run_ui():
                                         
                                         st.markdown(f"#### 📊 Desglose por {breakdown_selected} - {metric_display_name}")
                                         
+                                        # Selector de vista: Tabla vs Tarjetas
+                                        breakdown_key = f"{breakdown_selected}_{metric_display_name}"
+                                        view_mode = st.radio(
+                                            "Visualización:",
+                                            ["📊 Tabla Comparativa", "🃏 Tarjetas Detalladas"],
+                                            horizontal=True,
+                                            key=f"view_{breakdown_key}"
+                                        )
+                                        
                                         # Importar funciones de renderizado
                                         from src.utils.statistical_analysis import (
-                                            create_multivariant_card
+                                            create_multivariant_card,
+                                            calculate_single_comparison
                                         )
                                         
                                         # OPTIMIZACIÓN #3: Paralelización de desgloses
@@ -2057,25 +2075,140 @@ def run_ui():
                                             # Los resultados ya vienen en el orden correcto de segment_values
                                             pass
                                         
-                                        # Renderizar resultados (ya procesados en paralelo y ordenados)
-                                        for result in segment_results:
-                                            try:
-                                                # Renderizar tarjeta unificada con todas las variantes
-                                                create_multivariant_card(
-                                                    metric_name=metric_display_name,
-                                                    variants=result['variants'],
-                                                    experiment_name=experiment_name_stat,
-                                                    metric_subtitle=result['metric_subtitle'],
-                                                    chi_square_result=None
-                                                )
+                                        # Renderizar resultados según el modo seleccionado
+                                        if view_mode == "📊 Tabla Comparativa":
+                                            # Modo Tabla: Acumular datos y mostrar DataFrame
+                                            data_rows = []
+                                            
+                                            for result in segment_results:
+                                                try:
+                                                    variants = result['variants']
+                                                    segment_value = result['segment']
+                                                    
+                                                    if len(variants) < 1:
+                                                        continue
+                                                    
+                                                    # Baseline (control) es la primera variante
+                                                    baseline = variants[0]
+                                                    
+                                                    # Calcular CR del control
+                                                    cr_control = (baseline['x'] / baseline['n']) * 100 if baseline['n'] > 0 else 0
+                                                    
+                                                    # Iterar sobre todas las variantes (excluyendo el control, índice 0)
+                                                    if len(variants) > 1:
+                                                        # Bucle interno: una fila por cada variante comparada contra el control
+                                                        for i in range(1, len(variants)):
+                                                            variant = variants[i]
+                                                            variant_name = variant.get('name', f'Variant-{i}')
+                                                            
+                                                            comparison = calculate_single_comparison(baseline, variant)
+                                                            
+                                                            cr_variant = (variant['x'] / variant['n']) * 100 if variant['n'] > 0 else 0
+                                                            p_value = comparison['p_value']
+                                                            is_significant = comparison['significant']
+                                                            
+                                                            data_rows.append({
+                                                                "Segmento": segment_value,
+                                                                "Variante": variant_name,
+                                                                "Sesiones (Ctrl)": baseline['n'],
+                                                                "Sesiones (Var)": variant['n'],
+                                                                "CR Control": cr_control,
+                                                                "CR Variant": cr_variant,
+                                                                "Lift (%)": comparison['relative_lift'],  # Ya está en porcentaje
+                                                                "P-Value": p_value,
+                                                                "Sig.": "✅" if is_significant else "-"
+                                                            })
+                                                    else:
+                                                        # Solo hay control, mostrar solo datos del control
+                                                        data_rows.append({
+                                                            "Segmento": segment_value,
+                                                            "Variante": "N/A",
+                                                            "Sesiones (Ctrl)": baseline['n'],
+                                                            "Sesiones (Var)": 0,
+                                                            "CR Control": cr_control,
+                                                            "CR Variant": 0.0,
+                                                            "Lift (%)": 0.0,
+                                                            "P-Value": 1.0,
+                                                            "Sig.": "-"
+                                                        })
+                                                    
+                                                except Exception as e:
+                                                    # Manejar errores silenciosamente
+                                                    continue
+                                            
+                                            # Renderizar tabla resumen si hay datos
+                                            if len(data_rows) > 0:
+                                                df_segmentation = pd.DataFrame(data_rows)
                                                 
-                                            except Exception as e:
-                                                # Manejar errores silenciosamente
-                                                continue
+                                                st.dataframe(
+                                                    df_segmentation,
+                                                    use_container_width=True,
+                                                    hide_index=True,
+                                                    column_config={
+                                                        "Segmento": st.column_config.TextColumn(
+                                                            "Segmento",
+                                                            help="Segmento de análisis (país, dispositivo, etc.)"
+                                                        ),
+                                                        "Variante": st.column_config.TextColumn(
+                                                            "Variante",
+                                                            help="Nombre de la variante comparada contra el control"
+                                                        ),
+                                                        "CR Control": st.column_config.NumberColumn(
+                                                            "CR Control (%)",
+                                                            format="%.2f%%",
+                                                            help="Tasa de conversión del grupo control"
+                                                        ),
+                                                        "CR Variant": st.column_config.NumberColumn(
+                                                            "CR Variant (%)",
+                                                            format="%.2f%%",
+                                                            help="Tasa de conversión de la variante"
+                                                        ),
+                                                        "Lift (%)": st.column_config.NumberColumn(
+                                                            "Lift (%)",
+                                                            format="%.2f%%",
+                                                            help="Diferencia relativa entre variante y control"
+                                                        ),
+                                                        "P-Value": st.column_config.NumberColumn(
+                                                            "P-Value",
+                                                            format="%.5f",
+                                                            help="Valor p del test estadístico (significativo si < 0.05)"
+                                                        ),
+                                                        "Sesiones (Ctrl)": st.column_config.NumberColumn(
+                                                            "Sesiones (Ctrl)",
+                                                            format="%d",
+                                                            help="Número de sesiones en el grupo control"
+                                                        ),
+                                                        "Sesiones (Var)": st.column_config.NumberColumn(
+                                                            "Sesiones (Var)",
+                                                            format="%d",
+                                                            help="Número de sesiones en la variante"
+                                                        ),
+                                                    }
+                                                )
+                                            else:
+                                                # Si no se encontraron datos, mostrar mensaje informativo
+                                                st.info(f"ℹ️ No se encontraron segmentos válidos para desglosar por '{breakdown_selected}' en la métrica '{metric_display_name}'.")
                                         
-                                        # Si no se renderizó ninguna tarjeta, mostrar mensaje informativo
-                                        if len(segment_results) == 0:
-                                            st.info(f"ℹ️ No se encontraron segmentos válidos para desglosar por '{breakdown_selected}' en la métrica '{metric_display_name}'.")
+                                        else:
+                                            # Modo Tarjetas: Renderizar tarjetas detalladas (lógica original)
+                                            for result in segment_results:
+                                                try:
+                                                    # Renderizar tarjeta unificada con todas las variantes
+                                                    create_multivariant_card(
+                                                        metric_name=metric_display_name,
+                                                        variants=result['variants'],
+                                                        experiment_name=experiment_name_stat,
+                                                        metric_subtitle=result['metric_subtitle'],
+                                                        chi_square_result=None
+                                                    )
+                                                    
+                                                except Exception as e:
+                                                    # Manejar errores silenciosamente
+                                                    continue
+                                            
+                                            # Si no se renderizó ninguna tarjeta, mostrar mensaje informativo
+                                            if len(segment_results) == 0:
+                                                st.info(f"ℹ️ No se encontraron segmentos válidos para desglosar por '{breakdown_selected}' en la métrica '{metric_display_name}'.")
                                     
                                     # Cerrar el bucle de métricas
 

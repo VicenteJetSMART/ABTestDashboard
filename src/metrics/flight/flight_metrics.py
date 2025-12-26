@@ -1,7 +1,4 @@
 # filtros amplitude
-from src.utils.amplitude_filters import (
-    get_DB_filter
-)
 
 # ===== NEXT STEP RATE (NSR) =====
 
@@ -11,24 +8,12 @@ FLIGHT_NSR = {'events': [
     ('baggage_dom_loaded', [])
 ]}
 
-# Next Step Rate Flight - DB
-FLIGHT_DB_NSR = {'events': [
-    ('flight_dom_loaded_flight', [get_DB_filter()]),
-    ('baggage_dom_loaded', [get_DB_filter()])
-]}
-
 # ===== WEBSITE CONVERSION RATE (WCR) =====
 
 # Website Conversion Rate from Flight - General
 FLIGHT_WCR = {'events': [
     ('flight_dom_loaded_flight', []),
     ('revenue_amount', [])
-]}
-
-# Website Conversion Rate from Flight - DB
-FLIGHT_DB_WCR = {'events': [
-    ('flight_dom_loaded_flight', [get_DB_filter()]),
-    ('revenue_amount', [get_DB_filter()])
 ]}
 
 # ===== SELECTION RATE =====

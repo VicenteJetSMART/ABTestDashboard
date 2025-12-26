@@ -1,8 +1,7 @@
 # filtros amplitude
 from src.utils.amplitude_filters import (
     cabin_bag_filter,
-    checked_bag_filter,
-    get_DB_filter
+    checked_bag_filter
 )
 
 # ===== NEXT STEP RATE (NSR) =====
@@ -13,22 +12,10 @@ BAGGAGE_NSR = {'events': [
     ('seatmap_dom_loaded', [])
 ]}
 
-# Next Step Rate Baggage - DB
-BAGGAGE_DB_NSR = {'events': [
-    ('baggage_dom_loaded', [get_DB_filter()]),
-    ('seatmap_dom_loaded', [get_DB_filter()])
-]}
-
 # Next Step Rate Baggage - Vuela Ligero
 BAGGAGE_VUELA_LIGERO_NSR = {'events': [
     ('ce:(NEW) baggage_dom_loaded_with_vuela_ligero', []),
     ('seatmap_dom_loaded', [])
-]}
-
-# Next Step Rate Baggage - DB (Vuela Ligero)
-BAGGAGE_VUELA_LIGERO_DB_NSR = {'events': [
-    ('ce:(NEW) baggage_dom_loaded_with_vuela_ligero', [get_DB_filter()]),
-    ('seatmap_dom_loaded', [get_DB_filter()])
 ]}
 
 # ===== WEBSITE CONVERSION RATE (WCR) =====
@@ -53,22 +40,10 @@ CABIN_BAG_A2C = {'events': [
     ('seatmap_dom_loaded', [cabin_bag_filter()])
 ]}
 
-# Cabin Bag A2C - DB
-CABIN_BAG_DB_A2C = {'events': [
-    ('ce:(NEW) baggage_dom_loaded_with_vuela_ligero', [get_DB_filter()]),
-    ('seatmap_dom_loaded', [cabin_bag_filter(), get_DB_filter()])
-]}
-
 # Checked Bag A2C - General (Vuela Ligero)
 CHECKED_BAG_A2C = {'events': [
     ('ce:(NEW) baggage_dom_loaded_with_vuela_ligero', []),
     ('seatmap_dom_loaded', [checked_bag_filter()])
-]}
-
-# Checked Bag A2C - DB (Vuela Ligero)
-CHECKED_BAG_DB_A2C = {'events': [
-    ('ce:(NEW) baggage_dom_loaded_with_vuela_ligero', [get_DB_filter()]),
-    ('seatmap_dom_loaded', [checked_bag_filter(), get_DB_filter()])
 ]}
 
 # Add to Cart Cabin Bag (El filtro va en el SEGUNDO evento)

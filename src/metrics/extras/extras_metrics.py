@@ -1,7 +1,4 @@
 # filtros amplitude
-from src.utils.amplitude_filters import (
-    get_DB_filter
-)
 
 # ===== NEXT STEP RATE (NSR) =====
 
@@ -11,24 +8,12 @@ EXTRAS_NSR = {'events': [
     ('passengers_dom_loaded', [])
 ]}
 
-# Next Step Rate Extras - DB
-EXTRAS_DB_NSR = {'events': [
-    ('extras_dom_loaded', [get_DB_filter()]),
-    ('passengers_dom_loaded', [get_DB_filter()])
-]}
-
 # ===== WEBSITE CONVERSION RATE (WCR) =====
 
 # Website Conversion Rate from Extras - General
 EXTRAS_WCR = {'events': [
     ('extras_dom_loaded', []),
     ('revenue_amount', [])
-]}
-
-# Website Conversion Rate from Extras - DB
-EXTRAS_DB_WCR = {'events': [
-    ('extras_dom_loaded', [get_DB_filter()]),
-    ('revenue_amount', [get_DB_filter()])
 ]}
 
 # ===== SELECTION RATE =====
