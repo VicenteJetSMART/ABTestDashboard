@@ -1613,7 +1613,7 @@ def run_ui():
                     # LABORATORIO DE SEGMENTACIÓN V2
                     # ============================================
                     st.markdown("---")
-                    st.markdown("### 🔬 Laboratorio de Segmentación")
+                    st.markdown("### Segmentación")
                     st.caption("Desglosa los resultados por diferentes dimensiones para encontrar insights ocultos")
                     
                     # Selector de desglose
@@ -1626,15 +1626,15 @@ def run_ui():
                         key=f"breakdown_selector_{experiment_id_stat}"
                     )
                     
-                    # Toggle de modo debug (solo visible cuando hay desglose activo)
-                    if breakdown_selected != 'Ninguno':
-                        debug_mode = st.checkbox(
-                            "🕵️ Modo Debug (mostrar payloads de API)",
-                            value=st.session_state.get('debug_mode', False),
-                            key=f"debug_mode_{experiment_id_stat}",
-                            help="Activa la visualización de los payloads enviados a Amplitude para debugging"
-                        )
-                        st.session_state['debug_mode'] = debug_mode
+                    # Toggle de modo debug (oculto por ahora)
+                    # if breakdown_selected != 'Ninguno':
+                    #     debug_mode = st.checkbox(
+                    #         "🕵️ Modo Debug (mostrar payloads de API)",
+                    #         value=st.session_state.get('debug_mode', False),
+                    #         key=f"debug_mode_{experiment_id_stat}",
+                    #         help="Activa la visualización de los payloads enviados a Amplitude para debugging"
+                    #     )
+                    #     st.session_state['debug_mode'] = debug_mode
                     
                     # Si se selecciona un desglose, calcular estadísticas por segmento
                     if breakdown_selected != 'Ninguno':
@@ -1747,22 +1747,44 @@ def run_ui():
                                 if not segment_values:
                                     st.warning(f"⚠️ No se encontraron valores para desglosar por '{breakdown_selected}'")
                                 else:
+                                    # Pre-calcular segmentos disponibles
+                                    available_segments = segment_values
+                                    
+                                    # Control global de visualización
+                                    show_cards = st.toggle(
+                                        "🔍 Ver Detalle en Tarjetas",
+                                        value=False,
+                                        key=f"show_cards_{breakdown_selected}_{experiment_id_stat}",
+                                        help="Activa la visualización detallada en tarjetas. Por defecto se muestran tablas resumen."
+                                    )
+                                    
+                                    # Multiselect global para seleccionar segmentos (solo visible cuando show_cards está ON)
+                                    selected_segments_view = []
+                                    if show_cards:
+                                        selected_segments_view = st.multiselect(
+                                            "Selecciona Segmentos a Visualizar",
+                                            options=available_segments,
+                                            default=available_segments,  # Por defecto todos los segmentos
+                                            key=f"selected_segments_{breakdown_selected}_{experiment_id_stat}",
+                                            help="Selecciona los segmentos que deseas visualizar en detalle"
+                                        )
+                                    
+                                    # Determinar qué segmentos procesar según el modo
+                                    # Si show_cards está ON y hay segmentos seleccionados, solo procesar los seleccionados (para optimizar)
+                                    # Si show_cards está OFF, procesar todos los segmentos (para las tablas)
+                                    if show_cards and selected_segments_view:
+                                        segments_to_process = selected_segments_view
+                                    else:
+                                        segments_to_process = available_segments
+                                    
                                     # Procesar cada métrica con desglose
                                     for metric_info in original_metrics:
                                         metric_display_name = metric_info['name']
                                         metric_events = metric_info['events']
                                         metric_filters = metric_info.get('filters', {})
                                         
+                                        # Mostrar título de la métrica
                                         st.markdown(f"#### 📊 Desglose por {breakdown_selected} - {metric_display_name}")
-                                        
-                                        # Selector de vista: Tabla vs Tarjetas
-                                        breakdown_key = f"{breakdown_selected}_{metric_display_name}"
-                                        view_mode = st.radio(
-                                            "Visualización:",
-                                            ["📊 Tabla Comparativa", "🃏 Tarjetas Detalladas"],
-                                            horizontal=True,
-                                            key=f"view_{breakdown_key}"
-                                        )
                                         
                                         # Importar funciones de renderizado
                                         from src.utils.statistical_analysis import (
@@ -2006,13 +2028,14 @@ def run_ui():
                                                 return {'error': str(e), 'segment': segment_value}
                                         
                                         # OPTIMIZACIÓN #3: Ejecutar todos los segmentos en paralelo
+                                        # Usar segments_to_process en lugar de segment_values para optimizar cuando show_cards está ON
                                         breakdown_progress = st.progress(0)
-                                        total_segments = len(segment_values)
+                                        total_segments = len(segments_to_process)
                                         segment_results = []
                                         
                                         with ThreadPoolExecutor(max_workers=10) as executor:
                                             # Enviar todas las tareas en paralelo
-                                            future_to_segment = {executor.submit(process_segment, segment_value): segment_value for segment_value in segment_values}
+                                            future_to_segment = {executor.submit(process_segment, segment_value): segment_value for segment_value in segments_to_process}
                                             
                                             # Recopilar resultados a medida que completan
                                             completed = 0
@@ -2076,7 +2099,8 @@ def run_ui():
                                             pass
                                         
                                         # Renderizar resultados según el modo seleccionado
-                                        if view_mode == "📊 Tabla Comparativa":
+                                        if not show_cards:
+                                            # Modo Tabla (por defecto): Mostrar tablas resumen
                                             # Modo Tabla: Acumular datos y mostrar DataFrame
                                             data_rows = []
                                             
@@ -2189,26 +2213,31 @@ def run_ui():
                                                 # Si no se encontraron datos, mostrar mensaje informativo
                                                 st.info(f"ℹ️ No se encontraron segmentos válidos para desglosar por '{breakdown_selected}' en la métrica '{metric_display_name}'.")
                                         
-                                        else:
-                                            # Modo Tarjetas: Renderizar tarjetas detalladas (lógica original)
-                                            for result in segment_results:
-                                                try:
-                                                    # Renderizar tarjeta unificada con todas las variantes
-                                                    create_multivariant_card(
-                                                        metric_name=metric_display_name,
-                                                        variants=result['variants'],
-                                                        experiment_name=experiment_name_stat,
-                                                        metric_subtitle=result['metric_subtitle'],
-                                                        chi_square_result=None
-                                                    )
-                                                    
-                                                except Exception as e:
-                                                    # Manejar errores silenciosamente
-                                                    continue
-                                            
-                                            # Si no se renderizó ninguna tarjeta, mostrar mensaje informativo
-                                            if len(segment_results) == 0:
-                                                st.info(f"ℹ️ No se encontraron segmentos válidos para desglosar por '{breakdown_selected}' en la métrica '{metric_display_name}'.")
+                                        elif show_cards:
+                                            # Modo Tarjetas: Renderizar tarjetas detalladas solo para segmentos seleccionados
+                                            if selected_segments_view:
+                                                # Los resultados ya están filtrados porque solo procesamos los segmentos seleccionados
+                                                for result in segment_results:
+                                                    try:
+                                                        # Renderizar tarjeta unificada con todas las variantes
+                                                        create_multivariant_card(
+                                                            metric_name=metric_display_name,
+                                                            variants=result['variants'],
+                                                            experiment_name=experiment_name_stat,
+                                                            metric_subtitle=result['metric_subtitle'],
+                                                            chi_square_result=None
+                                                        )
+                                                        
+                                                    except Exception as e:
+                                                        # Manejar errores silenciosamente
+                                                        continue
+                                                
+                                                # Si no se renderizó ninguna tarjeta, mostrar mensaje informativo
+                                                if len(segment_results) == 0:
+                                                    st.info(f"ℹ️ No se encontraron segmentos válidos para desglosar por '{breakdown_selected}' en la métrica '{metric_display_name}'.")
+                                            else:
+                                                # Si no hay segmentos seleccionados, mostrar mensaje
+                                                st.info("ℹ️ Por favor, selecciona al menos un segmento para visualizar en detalle.")
                                     
                                     # Cerrar el bucle de métricas
 
