@@ -682,22 +682,22 @@ def run_ui():
                     
                     st.markdown("---")
                     
-                    # Mostrar tabla de métricas disponibles
-                    if PREDEFINED_METRICS_QUICK:
-                        try:
-                            from src.utils.metrics_loader import get_metrics_info
-                            metrics_info_quick = get_metrics_info(PREDEFINED_METRICS_QUICK)
-                            
-                            if metrics_info_quick:
-                                with st.expander("📚 Ver Métricas Disponibles", expanded=False):
-                                    df_metrics_quick = pd.DataFrame(metrics_info_quick)
-                                    st.dataframe(
-                                        df_metrics_quick,
-                                        use_container_width=True,
-                                        hide_index=True
-                                    )
-                        except Exception as e:
-                            st.warning(f"⚠️ Error mostrando métricas: {e}")
+                    # Mostrar tabla de métricas disponibles (COMENTADO - no se muestra en la UI)
+                    # if PREDEFINED_METRICS_QUICK:
+                    #     try:
+                    #         from src.utils.metrics_loader import get_metrics_info
+                    #         metrics_info_quick = get_metrics_info(PREDEFINED_METRICS_QUICK)
+                    #         
+                    #         if metrics_info_quick:
+                    #             with st.expander("📚 Ver Métricas Disponibles", expanded=False):
+                    #                 df_metrics_quick = pd.DataFrame(metrics_info_quick)
+                    #                 st.dataframe(
+                    #                     df_metrics_quick,
+                    #                     use_container_width=True,
+                    #                     hide_index=True
+                    #                 )
+                    #     except Exception as e:
+                    #         st.warning(f"⚠️ Error mostrando métricas: {e}")
                     
                     st.markdown("---")
                     
@@ -910,25 +910,6 @@ def run_ui():
                                     st.info(f"**Variantes detectadas:** {', '.join(experiment_variants)}")
                                 
                                 # ============================================
-                                # TABLA 1: RESUMEN EJECUTIVO (1 fila por métrica)
-                                # ============================================
-                                st.markdown("### 📊 Resumen Ejecutivo")
-                                summary_data = []
-                                for metric_name, df_metric in metrics_results.items():
-                                    if not df_metric.empty:
-                                        summary_data.append({
-                                            'Métrica': metric_name,
-                                            'Registros': len(df_metric),
-                                            'Variantes': df_metric['Variant'].nunique() if 'Variant' in df_metric.columns else 0,
-                                            'Etapas': df_metric['Funnel Stage'].nunique() if 'Funnel Stage' in df_metric.columns else 0,
-                                            'Total Eventos': f"{df_metric['Event Count'].sum():,.0f}" if 'Event Count' in df_metric.columns else "0"
-                                        })
-                                
-                                if summary_data:
-                                    df_metric_summary = pd.DataFrame(summary_data)
-                                    st.dataframe(df_metric_summary, use_container_width=True, hide_index=True)
-                                
-                                # ============================================
                                 # TABLA 2: DETALLE DE DATOS (Todas las filas)
                                 # ============================================
                                 st.markdown("### 📋 Detalle de Datos")
@@ -1016,20 +997,20 @@ def run_ui():
                                     df_detailed = pd.concat(all_detailed_data, axis=0, ignore_index=True)
                                     
                                     # Reordenar columnas para mejor visualización
-                                    preferred_order = [
-                                        'Métrica', 'Start Date', 'End Date', 'Date',
-                                        'ExperimentID', 'Culture', 'Device',
-                                        'Flow Type', 'Trip Type', 'Flight Profile', 'Travel Group',
+                                    # Columnas prioritarias (información crítica primero)
+                                    priority_cols = [
+                                        'Métrica', 'Start Date', 'End Date', 'ExperimentID',
                                         'Variant', 'Funnel Stage', 'Event Count'
                                     ]
                                     
-                                    # Obtener columnas existentes en el orden preferido
-                                    existing_columns = [col for col in preferred_order if col in df_detailed.columns]
-                                    # Agregar cualquier columna adicional que no esté en la lista
-                                    remaining_columns = [col for col in df_detailed.columns if col not in existing_columns]
-                                    final_column_order = existing_columns + remaining_columns
+                                    # Identificar cuáles de estas existen realmente en el DF
+                                    existing_priority = [c for c in priority_cols if c in df_detailed.columns]
                                     
-                                    df_detailed = df_detailed[final_column_order]
+                                    # Identificar el resto de columnas (segmentadores y otras)
+                                    other_cols = [c for c in df_detailed.columns if c not in existing_priority]
+                                    
+                                    # Reordenar: prioritarias primero, luego el resto
+                                    df_detailed = df_detailed[existing_priority + other_cols]
                                     st.dataframe(df_detailed, use_container_width=True, hide_index=True)
                                     
                                     # Botón de descarga para tabla detallada
