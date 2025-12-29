@@ -334,13 +334,8 @@ def run_ui():
         # ============================================================
         st.subheader("🔍 Configuración de Análisis")
         
-        use_cumulative = st.toggle(
-            "📈 Usar acumulados (cumulativeRaw)",
-            value=True,
-            help="Si está activado, retorna una fila por métrica con valores acumulados"
-        )
-        
-        st.divider()
+        # Hardcodear use_cumulative = True (toggle eliminado)
+        use_cumulative = True
         
         # Cargar experimentos para la sidebar
         with st.spinner("Cargando experimentos..."):
@@ -410,47 +405,63 @@ def run_ui():
                         selected_row_sidebar = df_exp_filtered_sidebar.iloc[selected_exp_idx_sidebar]
                         selected_row_original_sidebar = df_exp_sidebar.iloc[selected_exp_idx_sidebar]
                     
-                    # Detalles del experimento (versión compacta en sidebar)
-                    with st.expander("📋 Detalles del Experimento", expanded=False):
-                        st.write(f"**Nombre:** {selected_row_sidebar.get('name', 'N/A')}")
-                        st.write(f"**Key:** {selected_row_sidebar.get('key', 'N/A')}")
-                        st.write(f"**Estado:** {selected_row_sidebar.get('state', 'N/A')}")
-                        st.write(f"**Fecha Inicio:** {selected_row_sidebar.get('startDate', 'N/A')}")
-                        end_date_display = selected_row_sidebar.get('endDate', 'N/A')
-                        if pd.isna(end_date_display) or end_date_display in ['None', 'nan', '']:
-                            end_date_display = f"{pd.Timestamp.now().strftime('%Y-%m-%d')} (Hoy)"
-                        st.write(f"**Fecha Fin:** {end_date_display}")
-                        st.write(f"**Variantes:** {selected_row_sidebar.get('variants', 'N/A')}")
-                    
                     # Guardar en session_state inmediatamente
                     st.session_state['selected_row_sidebar'] = selected_row_sidebar
                     st.session_state['selected_row_original_sidebar'] = selected_row_original_sidebar
                     
                     st.divider()
                     
-                    # Filtros de análisis
+                    # ============================================================
+                    # FILTROS PRINCIPALES (Visibles directamente)
+                    # ============================================================
+                    st.subheader("🎯 Filtros Principales")
+                    
+                    device_quick = st.multiselect(
+                        "📱 Device",
+                        options=["desktop", "mobile"],
+                        default=[],
+                        key="device_quick",
+                        help="Tipo de dispositivo a analizar. Deja vacío para ver todos."
+                    )
+                    culture_quick = st.multiselect(
+                        "🌍 Culture",
+                        options=["CL", "AR", "PE", "CO", "INTER"],
+                        default=[],
+                        key="culture_quick",
+                        help="Cultura/país a analizar. INTER incluye: BR, UY, PY, EC, US, DO. Deja vacío para ver todos."
+                    )
+                    flow_type_quick = st.multiselect(
+                        "🔄 Tipo de Flujo",
+                        options=["DB", "PB", "CK"],
+                        default=[],
+                        key="flow_type_quick",
+                        help="Tipo de flujo a analizar. Deja vacío para ver todos."
+                    )
+                    # Mapeo de Ventana de Conversión a Segundos (Amplitude requiere int)
+                    conversion_window_options_quick = {
+                        "5 minutos": 300,
+                        "15 minutos": 900,
+                        "30 minutos": 1800,
+                        "1 hora": 3600,
+                        "1 día": 86400
+                    }
+                    conversion_window_label_quick = st.selectbox(
+                        "⏱️ Ventana de Conversión",
+                        options=list(conversion_window_options_quick.keys()),
+                        index=2,
+                        key="conversion_window_quick",  # El widget guarda el string en session_state
+                        help="Tiempo máximo para considerar una conversión válida"
+                    )
+                    # Convertir el string seleccionado a segundos (entero) y guardar en session_state
+                    conversion_window_seconds = conversion_window_options_quick.get(conversion_window_label_quick, 1800)
+                    st.session_state['conversion_window_seconds'] = conversion_window_seconds  # Guardar el entero
+                    
+                    st.divider()
+                    
+                    # ============================================================
+                    # FILTROS AVANZADOS (En expander)
+                    # ============================================================
                     with st.expander("⚙️ Filtros Avanzados", expanded=False):
-                        device_quick = st.multiselect(
-                            "📱 Device",
-                            options=["desktop", "mobile"],
-                            default=[],
-                            key="device_quick",
-                            help="Tipo de dispositivo a analizar. Deja vacío para ver todos."
-                        )
-                        culture_quick = st.multiselect(
-                            "🌍 Culture",
-                            options=["CL", "AR", "PE", "CO", "INTER"],
-                            default=[],
-                            key="culture_quick",
-                            help="Cultura/país a analizar. INTER incluye: BR, UY, PY, EC, US, DO. Deja vacío para ver todos."
-                        )
-                        flow_type_quick = st.multiselect(
-                            "🔄 Tipo de Flujo",
-                            options=["DB", "PB", "CK"],
-                            default=[],
-                            key="flow_type_quick",
-                            help="Tipo de flujo a analizar. Deja vacío para ver todos."
-                        )
                         bundle_profile_quick = st.multiselect(
                             "✈️ Perfil de Vuelo",
                             options=["Vuela Ligero", "Smart", "Full", "Smart + Full"],
@@ -472,24 +483,6 @@ def run_ui():
                             key="travel_group_quick",
                             help="Tipo de grupo de viaje. Deja vacío para ver todos."
                         )
-                        # Mapeo de Ventana de Conversión a Segundos (Amplitude requiere int)
-                        conversion_window_options_quick = {
-                            "5 minutos": 300,
-                            "15 minutos": 900,
-                            "30 minutos": 1800,
-                            "1 hora": 3600,
-                            "1 día": 86400
-                        }
-                        conversion_window_label_quick = st.selectbox(
-                            "⏱️ Ventana de Conversión",
-                            options=list(conversion_window_options_quick.keys()),
-                            index=2,
-                            key="conversion_window_quick",  # El widget guarda el string en session_state
-                            help="Tiempo máximo para considerar una conversión válida"
-                        )
-                        # Convertir el string seleccionado a segundos (entero) y guardar en session_state
-                        conversion_window_seconds = conversion_window_options_quick.get(conversion_window_label_quick, 1800)
-                        st.session_state['conversion_window_seconds'] = conversion_window_seconds  # Guardar el entero
                     
                     st.divider()
                     
@@ -521,11 +514,11 @@ def run_ui():
                     except Exception as e:
                         st.warning(f"⚠️ Error cargando métricas: {e}")
                     
-                    # Selectores de métricas y eventos
-                    st.markdown("#### 📊 Métricas y Eventos")
+                    # Selector de métricas
+                    st.subheader("📊 Métricas")
                     if PREDEFINED_METRICS_QUICK:
                         selected_metrics_quick = st.multiselect(
-                            "Métricas Predefinidas:",
+                            "Selecciona Métricas:",
                             options=list(PREDEFINED_METRICS_QUICK.keys()),
                             default=[],
                             key="metrics_quick_sidebar",
@@ -534,13 +527,8 @@ def run_ui():
                     else:
                         selected_metrics_quick = []
                     
-                    selected_events_raw_quick = st.multiselect(
-                        "Eventos Individuales:",
-                        options=AVAILABLE_EVENTS,
-                        default=[],
-                        key="events_raw_quick_sidebar",
-                        help="Eventos individuales"
-                    )
+                    # Eventos individuales eliminados - asumir lista vacía
+                    selected_events_raw_quick = []
                     
                     # Procesar métricas seleccionadas
                     metrics_to_process_sidebar = []
@@ -609,6 +597,23 @@ def run_ui():
                     # use_cumulative se guarda porque no tiene widget con key en la sidebar actual
                     st.session_state['use_cumulative'] = use_cumulative
                     
+                    st.divider()
+                    
+                    # ============================================================
+                    # BOTÓN DE EJECUCIÓN
+                    # ============================================================
+                    btn_run_quick = st.button(
+                        "🚀 Ejecutar Análisis",
+                        use_container_width=True,
+                        type="primary",
+                        key="btn_run_quick_sidebar",
+                        disabled=len(metrics_to_process_sidebar) == 0
+                    )
+                    
+                    # Guardar en session_state cuando se presiona el botón
+                    if btn_run_quick and metrics_to_process_sidebar:
+                        st.session_state['run_analysis'] = True
+                    
                 else:
                     st.warning("No hay experimentos disponibles")
                     selected_exp_idx_sidebar = None
@@ -630,38 +635,19 @@ def run_ui():
         st.divider()
         
         # ============================================================
-        # SECCIÓN DE CONFIGURACIÓN (Variables de entorno)
-        # ============================================================
-        st.header("⚙️ Configuración")
-        
-        # Mostrar estado de carga de variables de entorno
-        if env_success:
-            st.success("✅ Variables de entorno cargadas")
-            with st.expander("ℹ️ Ver detalles"):
-                st.text(env_message)
-        else:
-            st.error("❌ Error cargando variables de entorno")
-            with st.expander("⚠️ Ver instrucciones", expanded=True):
-                st.markdown(env_message)
-        
-        st.caption("Las credenciales se leen desde .env en el raíz del proyecto.")
-        
-        st.markdown("---")
-        
-        # ============================================================
         # SECCIÓN DE OPTIMIZACIÓN
         # ============================================================
-        # 🚀 OPTIMIZACIÓN: Botón para limpiar caché
         st.subheader("🚀 Optimización")
-        if st.button("🗑️ Limpiar Caché de Amplitude"):
+        if st.button("🗑️ Limpiar Caché de Amplitude", key="clear_cache_sidebar"):
             clear_amplitude_cache()
             st.success("✅ Caché limpiado exitosamente")
             st.info("El caché acelera las consultas repetidas. Límpialo si los datos parecen desactualizados.")
         
-        st.markdown("---")
-        
         st.divider()
         
+        # ============================================================
+        # SECCIÓN DE INFORMACIÓN
+        # ============================================================
         st.subheader("ℹ️ Información")
         st.info("""
         **AB Test Dashboard**
@@ -715,18 +701,10 @@ def run_ui():
                     
                     st.markdown("---")
                     
-                    # Botón de ejecutar en el área principal
-                    col1, col2, col3 = st.columns([1, 2, 1])
-                    with col2:
-                        btn_run_quick = st.button(
-                            "🚀 Ejecutar Análisis",
-                            use_container_width=True,
-                            type="primary",
-                            key="btn_run_quick_main",
-                            disabled=len(metrics_to_process_sidebar) == 0
-                        )
+                    # Botón de ejecutar ahora está en la sidebar
+                    # Verificar si se presionó desde la sidebar
+                    btn_run_quick = st.session_state.get('run_analysis', False)
                     
-                    # Guardar en session_state cuando se presiona el botón
                     if btn_run_quick and metrics_to_process_sidebar:
                         st.session_state['run_analysis'] = True
                         st.session_state['metrics_to_process'] = metrics_to_process_sidebar
