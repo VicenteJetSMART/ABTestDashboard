@@ -1,6 +1,7 @@
 import os
 import sys
 import re
+import time
 from pathlib import Path
 from io import BytesIO
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -1872,13 +1873,40 @@ def run_ui():
                                                     if call_params.get('event_filters_map') is None:
                                                         call_params.pop('event_filters_map', None)
                                                     
-                                                    # Hacer llamada API
-                                                    if use_cumulative_breakdown:
-                                                        df_segment = final_pipeline_cumulative(**call_params)
-                                                    else:
-                                                        df_segment = final_pipeline(**call_params)
+                                                    # Hacer llamada API con retry y backoff
+                                                    max_retries = 3
+                                                    attempt = 0
+                                                    df_segment = None
                                                     
-                                                    if df_segment.empty:
+                                                    while attempt < max_retries:
+                                                        try:
+                                                            # Intentar obtener datos
+                                                            if use_cumulative_breakdown:
+                                                                df_segment = final_pipeline_cumulative(**call_params)
+                                                            else:
+                                                                df_segment = final_pipeline(**call_params)
+                                                            
+                                                            # Validar si la respuesta es útil (no vacía)
+                                                            if df_segment is not None and not df_segment.empty:
+                                                                break  # ¡Éxito! Salimos del bucle de reintentos
+                                                            
+                                                            # Si llegamos aquí, el DataFrame está vacío
+                                                            attempt += 1
+                                                            if attempt < max_retries:
+                                                                time.sleep(0.5)  # Esperamos medio segundo antes de reintentar
+                                                            else:
+                                                                return {'error': 'DataFrame vacío después de múltiples intentos', 'segment': segment_value}
+                                                        
+                                                        except Exception as api_error:
+                                                            # Si hay un error en la llamada API, reintentar
+                                                            attempt += 1
+                                                            if attempt < max_retries:
+                                                                time.sleep(0.5)  # Esperamos medio segundo antes de reintentar
+                                                            else:
+                                                                return {'error': f'Error en API después de {max_retries} intentos: {str(api_error)}', 'segment': segment_value}
+                                                    
+                                                    # Verificación final de seguridad
+                                                    if df_segment is None or df_segment.empty:
                                                         return {'error': 'DataFrame vacío', 'segment': segment_value}
                                                     
                                                     # Determinar initial_stage y final_stage (mismo código que antes)
