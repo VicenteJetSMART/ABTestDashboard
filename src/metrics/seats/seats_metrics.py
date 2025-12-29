@@ -143,7 +143,7 @@ SEATS_WCR = {'events': [
 # - Paso 2 (continue_clicked_seat): NO recibe filtros de segmento ni filtros técnicos (sin filtro)
 SEATS_NSR = {'events': [
     ('seatmap_dom_loaded', []),  # 1. ANCHOR: Aquí "muerden" los filtros globales del Dashboard (Family, Business, etc.)
-    ('continue_clicked_seat', [])  # 2. TARGET: NO recibe filtros de segmento ni filtros técnicos
+    ('extras_dom_loaded', [])  # 2. TARGET: NO recibe filtros de segmento ni filtros técnicos
 ]}
 
 
@@ -208,6 +208,6 @@ SEATS_SMART_CR = {'events': [
 # - Paso 2 (continue_clicked_seat): NO recibe filtros de segmento, solo valida que se seleccionaron asientos
 SEATS_A2C = {'events': [
     ('seatmap_dom_loaded', []),  # 1. ANCHOR: Aquí "muerden" los filtros globales del Dashboard (Family, Business, etc.)
-    ('continue_clicked_seat', [seats_count_filter()])  # 2. TARGET: NO recibe filtros de segmento, solo valida que se seleccionaron asientos
+    ('ce:seat_selected', [])  # 2. TARGET: NO recibe filtros de segmento, solo valida que se seleccionaron asientos
 ]}
 
