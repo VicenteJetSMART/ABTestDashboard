@@ -785,6 +785,107 @@ def create_comparison_matrix(metric_name, variants):
     """, unsafe_allow_html=True)
 
 
+def create_segmentation_table_html(data_rows):
+    """
+    Crea una tabla HTML estilizada para el desglose de KPIs con colores condicionales.
+    
+    Args:
+        data_rows: Lista de diccionarios con los datos de cada fila de la tabla
+        
+    Returns:
+        str: HTML de la tabla estilizada
+    """
+    if not data_rows:
+        return ""
+    
+    # Encabezados de la tabla
+    headers = ["Segmento", "Variante", "Sesiones (Ctrl)", "Sesiones (Var)", 
+               "CR Control", "CR Variant", "Lift (%)", "P-Value", "Sig."]
+    
+    # Crear filas de la tabla
+    table_rows = ""
+    for row in data_rows:
+        lift = row.get("Lift (%)", 0)
+        p_value = row.get("P-Value", 1.0)
+        is_significant = p_value < 0.05
+        
+        # Color para Improvement (Lift): verde si positivo, rojo si negativo
+        improvement_color = '#27AE60' if lift > 0 else '#E74C3C'
+        
+        # Color para P-Value: 
+        # - Verde si es significativo (< 0.05) y improvement es positivo
+        # - Rojo si es significativo (< 0.05) y improvement es negativo
+        # - Azul oscuro si no es significativo
+        if is_significant:
+            p_value_color = '#27AE60' if lift > 0 else '#E74C3C'
+        else:
+            p_value_color = '#1B365D'
+        
+        # Formatear valores
+        lift_sign = "+" if lift > 0 else ""
+        lift_display = f"{lift_sign}{lift:.2f}%"
+        p_value_display = f"{p_value:.5f}"
+        sig_display = "✅" if is_significant else "-"
+        
+        table_rows += f"""
+        <tr>
+            <td style="padding: 12px 16px; font-weight: 500; color: #1B365D; font-size: 14px; background: white; text-align: left; border-bottom: 1px solid #E0E6ED;">
+                {row.get('Segmento', 'N/A')}
+            </td>
+            <td style="padding: 12px 16px; font-weight: 500; color: #1B365D; font-size: 14px; background: white; text-align: left; border-bottom: 1px solid #E0E6ED;">
+                {row.get('Variante', 'N/A')}
+            </td>
+            <td style="padding: 12px 16px; font-weight: 500; color: #1B365D; font-size: 14px; background: white; text-align: center; border-bottom: 1px solid #E0E6ED;">
+                {row.get('Sesiones (Ctrl)', 0):,}
+            </td>
+            <td style="padding: 12px 16px; font-weight: 500; color: #1B365D; font-size: 14px; background: white; text-align: center; border-bottom: 1px solid #E0E6ED;">
+                {row.get('Sesiones (Var)', 0):,}
+            </td>
+            <td style="padding: 12px 16px; font-weight: 500; color: #1B365D; font-size: 14px; background: white; text-align: center; border-bottom: 1px solid #E0E6ED;">
+                {row.get('CR Control', 0):.2f}%
+            </td>
+            <td style="padding: 12px 16px; font-weight: 500; color: #1B365D; font-size: 14px; background: white; text-align: center; border-bottom: 1px solid #E0E6ED;">
+                {row.get('CR Variant', 0):.2f}%
+            </td>
+            <td style="padding: 12px 16px; font-weight: 600; color: {improvement_color}; font-size: 14px; background: white; text-align: center; border-bottom: 1px solid #E0E6ED;">
+                {lift_display}
+            </td>
+            <td style="padding: 12px 16px; font-weight: 600; color: {p_value_color}; font-size: 14px; background: white; text-align: center; border-bottom: 1px solid #E0E6ED;">
+                {p_value_display}
+            </td>
+            <td style="padding: 12px 16px; font-weight: 500; color: #1B365D; font-size: 14px; background: white; text-align: center; border-bottom: 1px solid #E0E6ED;">
+                {sig_display}
+            </td>
+        </tr>
+        """
+    
+    # HTML completo de la tabla
+    table_html = f"""
+    <div style="background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1); margin: 20px 0;">
+        <table style="width: 100%; border-collapse: collapse; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+            <thead>
+                <tr style="background: #F8FAFB;">
+                    <th style="padding: 14px 16px; text-align: left; font-weight: 600; color: #1B365D; font-size: 14px; border-bottom: 2px solid #E0E6ED;">Segmento</th>
+                    <th style="padding: 14px 16px; text-align: left; font-weight: 600; color: #1B365D; font-size: 14px; border-bottom: 2px solid #E0E6ED;">Variante</th>
+                    <th style="padding: 14px 16px; text-align: center; font-weight: 600; color: #1B365D; font-size: 14px; border-bottom: 2px solid #E0E6ED;">Sesiones (Ctrl)</th>
+                    <th style="padding: 14px 16px; text-align: center; font-weight: 600; color: #1B365D; font-size: 14px; border-bottom: 2px solid #E0E6ED;">Sesiones (Var)</th>
+                    <th style="padding: 14px 16px; text-align: center; font-weight: 600; color: #1B365D; font-size: 14px; border-bottom: 2px solid #E0E6ED;">CR Control</th>
+                    <th style="padding: 14px 16px; text-align: center; font-weight: 600; color: #1B365D; font-size: 14px; border-bottom: 2px solid #E0E6ED;">CR Variant</th>
+                    <th style="padding: 14px 16px; text-align: center; font-weight: 600; color: #1B365D; font-size: 14px; border-bottom: 2px solid #E0E6ED;">Lift (%)</th>
+                    <th style="padding: 14px 16px; text-align: center; font-weight: 600; color: #1B365D; font-size: 14px; border-bottom: 2px solid #E0E6ED;">P-Value</th>
+                    <th style="padding: 14px 16px; text-align: center; font-weight: 600; color: #1B365D; font-size: 14px; border-bottom: 2px solid #E0E6ED;">Sig.</th>
+                </tr>
+            </thead>
+            <tbody>
+                {table_rows}
+            </tbody>
+        </table>
+    </div>
+    """
+    
+    return table_html
+
+
 def create_comparison_cards(comparisons, is_control_section=True):
     """
     Crea tarjetas de comparación con estilo mejorado.

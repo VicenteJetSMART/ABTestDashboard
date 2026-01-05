@@ -1765,8 +1765,10 @@ def run_ui():
                                             # Importar funciones de renderizado
                                             from src.utils.statistical_analysis import (
                                                 create_multivariant_card,
-                                                calculate_single_comparison
+                                                calculate_single_comparison,
+                                                create_segmentation_table_html
                                             )
+                                            import streamlit.components.v1 as components
                                             
                                             # OPTIMIZACIÓN #3: Paralelización de desgloses
                                             # Función helper para procesar un segmento individual (ejecutada en paralelo)
@@ -2175,59 +2177,14 @@ def run_ui():
                                                 
                                                 # Renderizar tabla resumen si hay datos
                                                 if len(data_rows) > 0:
-                                                    # HARDENING: Crear DataFrame con reset_index para evitar problemas de índices duplicados
-                                                    df_segmentation = pd.DataFrame(data_rows).reset_index(drop=True)
-                                                    
-                                                    # Verificación de integridad: asegurar que el DataFrame tiene el número esperado de filas
+                                                    # Verificación de integridad: asegurar que hay datos suficientes
                                                     expected_min_rows = len(segments_to_process)  # Mínimo una fila por segmento
-                                                    if len(df_segmentation) < expected_min_rows:
-                                                        st.warning(f"⚠️ La tabla muestra {len(df_segmentation)} filas, pero se esperaban al menos {expected_min_rows} segmentos procesados.")
+                                                    if len(data_rows) < expected_min_rows:
+                                                        st.warning(f"⚠️ La tabla muestra {len(data_rows)} filas, pero se esperaban al menos {expected_min_rows} segmentos procesados.")
                                                     
-                                                    st.dataframe(
-                                                        df_segmentation,
-                                                        use_container_width=True,
-                                                        hide_index=True,
-                                                        column_config={
-                                                            "Segmento": st.column_config.TextColumn(
-                                                                "Segmento",
-                                                                help="Segmento de análisis (país, dispositivo, etc.)"
-                                                            ),
-                                                            "Variante": st.column_config.TextColumn(
-                                                                "Variante",
-                                                                help="Nombre de la variante comparada contra el control"
-                                                            ),
-                                                            "CR Control": st.column_config.NumberColumn(
-                                                                "CR Control (%)",
-                                                                format="%.2f%%",
-                                                                help="Tasa de conversión del grupo control"
-                                                            ),
-                                                            "CR Variant": st.column_config.NumberColumn(
-                                                                "CR Variant (%)",
-                                                                format="%.2f%%",
-                                                                help="Tasa de conversión de la variante"
-                                                            ),
-                                                            "Lift (%)": st.column_config.NumberColumn(
-                                                                "Lift (%)",
-                                                                format="%.2f%%",
-                                                                help="Diferencia relativa entre variante y control"
-                                                            ),
-                                                            "P-Value": st.column_config.NumberColumn(
-                                                                "P-Value",
-                                                                format="%.5f",
-                                                                help="Valor p del test estadístico (significativo si < 0.05)"
-                                                            ),
-                                                            "Sesiones (Ctrl)": st.column_config.NumberColumn(
-                                                                "Sesiones (Ctrl)",
-                                                                format="%d",
-                                                                help="Número de sesiones en el grupo control"
-                                                            ),
-                                                            "Sesiones (Var)": st.column_config.NumberColumn(
-                                                                "Sesiones (Var)",
-                                                                format="%d",
-                                                                help="Número de sesiones en la variante"
-                                                            ),
-                                                        }
-                                                    )
+                                                    # Generar y renderizar tabla HTML con colores condicionales
+                                                    table_html = create_segmentation_table_html(data_rows)
+                                                    components.html(table_html, height=400, scrolling=True)
                                                 else:
                                                     # Si no se encontraron datos, mostrar mensaje informativo
                                                     st.info(f"ℹ️ No se encontraron segmentos válidos para desglosar por '{breakdown_selected}' en la métrica '{metric_display_name}'.")
