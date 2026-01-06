@@ -660,6 +660,8 @@ def get_funnel_data_experiment(api_key, secret_key, start_date, end_date, experi
 		)
 		
 		if debug_mode_active:
+			# Mostrar un mensaje informativo antes del expander
+			st.info(f"🔍 Modo Debug activo para variante: {variant}")
 			debug_info = {
 				'experiment_id': experiment_id,
 				'variant': variant,

@@ -160,11 +160,17 @@ EXTRAS_GENERAL_CR = {'events': [
 ]}
 
 # CR Flexi
-# CORREGIDO: Usa extras_dom_loaded como anchor para igualar el denominador con FLEXI_A2C
+# CORREGIDO: Incluye paso intermedio extra_selected para igualar el embudo con FLEXI_A2C
 # Estrategia "Ghost Anchor": Filtros globales solo en el evento 1 (extras_dom_loaded)
 FLEXI_CR = {'events': [
     ('extras_dom_loaded', []),  # 1. ANCHOR: Recibe filtros globales, iguala el denominador del A2C
-    ('revenue_amount', [has_purchased_flexi_filter()])  # 2. GOAL: Filtro técnico en revenue_amount
+    ('extra_selected', [{       # 2. INTENTION: Solo usuarios que seleccionaron Flexi
+        'subprop_type': 'event',
+        'subprop_key': 'type',
+        'subprop_op': 'is',
+        'subprop_value': ['flexiFee']
+    }]),
+    ('revenue_amount', [has_purchased_flexi_filter()])  # 3. GOAL: Confirmación de compra
 ]}
 
 # CR Airport Checkin (El filtro va en el PRIMER evento)
@@ -179,19 +185,31 @@ AIRPORT_CHECKIN_CR = {'events': [
 ]}
 
 # CR Priority Boarding
-# CORREGIDO: Usa extras_dom_loaded como anchor para igualar el denominador con PRIORITY_BOARDING_A2C
+# CORREGIDO: Incluye paso intermedio extra_selected para igualar el embudo con PRIORITY_BOARDING_A2C
 # Estrategia "Ghost Anchor": Filtros globales solo en el evento 1 (extras_dom_loaded)
 PRIORITY_BOARDING_CR = {'events': [
     ('extras_dom_loaded', []),  # 1. ANCHOR: Recibe filtros globales, iguala el denominador del A2C
-    ('revenue_amount', [has_purchased_priority_filter()])  # 2. GOAL: Filtro técnico en revenue_amount
+    ('extra_selected', [{       # 2. INTENTION: Solo usuarios que seleccionaron Priority Boarding
+        'subprop_type': 'event',
+        'subprop_key': 'type',
+        'subprop_op': 'is',
+        'subprop_value': ['priorityBoarding']
+    }]),
+    ('revenue_amount', [has_purchased_priority_filter()])  # 3. GOAL: Confirmación de compra
 ]}
 
 # CR Pet
-# CORREGIDO: Usa extras_dom_loaded como anchor para igualar el denominador con PET_A2C
+# CORREGIDO: Incluye paso intermedio extra_selected para igualar el embudo con PET_A2C
 # Estrategia "Ghost Anchor": Filtros globales solo en el evento 1 (extras_dom_loaded)
 PET_CR = {'events': [
     ('extras_dom_loaded', []),  # 1. ANCHOR: Recibe filtros globales, iguala el denominador del A2C
-    ('revenue_amount', [has_purchased_pet_filter()])  # 2. GOAL: Filtro técnico en revenue_amount
+    ('extra_selected', [{       # 2. INTENTION: Solo usuarios que seleccionaron Pet
+        'subprop_type': 'event',
+        'subprop_key': 'type',
+        'subprop_op': 'is',
+        'subprop_value': ['pet']
+    }]),
+    ('revenue_amount', [has_purchased_pet_filter()])  # 3. GOAL: Confirmación de compra
 ]}
 
 # CR Insurance (El filtro va en el PRIMER evento)

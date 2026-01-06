@@ -1588,14 +1588,13 @@ def run_ui():
                     )
                     
                     # Toggle de modo debug (oculto por ahora)
-                    # if breakdown_selected != 'Ninguno':
-                    #     debug_mode = st.checkbox(
-                    #         "🕵️ Modo Debug (mostrar payloads de API)",
-                    #         value=st.session_state.get('debug_mode', False),
-                    #         key=f"debug_mode_{experiment_id_stat}",
-                    #         help="Activa la visualización de los payloads enviados a Amplitude para debugging"
-                    #     )
-                    #     st.session_state['debug_mode'] = debug_mode
+                    # debug_mode = st.checkbox(
+                    #     "🕵️ Modo Debug (mostrar payloads de API)",
+                    #     value=st.session_state.get('debug_mode', False),
+                    #     key=f"debug_mode_{experiment_id_stat}",
+                    #     help="Activa la visualización de los payloads enviados a Amplitude para debugging"
+                    # )
+                    # st.session_state['debug_mode'] = debug_mode
                     
                     # Si se selecciona un desglose, calcular estadísticas por segmento
                     if breakdown_selected != 'Ninguno':
