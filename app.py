@@ -512,7 +512,8 @@ def run_ui():
                                             events_list.insert(0, anchor_tuple)
                                             metric_def['hidden_first_step'] = True
                     except Exception as e:
-                        st.warning(f"⚠️ Error cargando métricas: {e}")
+                        # Error silenciado: solo se registra en terminal, no se muestra al usuario
+                        print(f"[Error interno] Error cargando métricas: {str(e)}")
                     
                     # Selector de métricas
                     st.subheader("📊 Métricas")
@@ -624,7 +625,8 @@ def run_ui():
                     selected_events_raw_quick = []
                     
             except Exception as e:
-                st.error(f"❌ Error cargando experimentos: {e}")
+                # Error silenciado: solo se registra en terminal, no se muestra al usuario
+                print(f"[Error interno] Error cargando experimentos: {str(e)}")
                 selected_exp_idx_sidebar = None
                 selected_row_sidebar = None
                 selected_row_original_sidebar = None
@@ -855,7 +857,8 @@ def run_ui():
                                         # Guardar resultado de esta métrica
                                         metrics_results[metric_name] = df_metric
                                     except Exception as e:
-                                        st.warning(f"⚠️ Error procesando métrica '{metric_name}': {e}")
+                                        # Error silenciado: solo se registra en terminal, no se muestra al usuario
+                                        print(f"[Error interno] Error procesando métrica '{metric_name}': {str(e)}")
                                         metrics_results[metric_name] = pd.DataFrame()
                                 
                                 progress_bar.empty()
@@ -1033,8 +1036,8 @@ def run_ui():
                                 st.session_state['run_analysis'] = False
                                 
                             except Exception as e:
-                                st.error(f"❌ Error ejecutando análisis: {e}")
-                                st.exception(e)
+                                # Error silenciado: solo se registra en terminal, no se muestra al usuario
+                                print(f"[Error interno] Error ejecutando análisis: {str(e)}")
                                 # Resetear el flag incluso si hay error
                                 st.session_state['run_analysis'] = False
                     else:
