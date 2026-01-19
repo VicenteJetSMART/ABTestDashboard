@@ -377,6 +377,39 @@ def prepare_variants_from_dataframe(df, initial_stage=None, final_stage=None):
         return variants
 
 
+def format_duration(seconds):
+    """
+    Convierte segundos a formato legible (MMm SSs, HHh MMm, etc.).
+    
+    Args:
+        seconds: Tiempo en segundos (float o int)
+        
+    Returns:
+        str: Tiempo formateado (ej: "3m 20s", "1h 30m", "45s")
+    """
+    if seconds is None or seconds < 0:
+        return "-"
+    
+    seconds = int(round(seconds))
+    
+    if seconds < 60:
+        return f"{seconds}s"
+    elif seconds < 3600:
+        minutes = seconds // 60
+        remaining_seconds = seconds % 60
+        if remaining_seconds == 0:
+            return f"{minutes}m"
+        else:
+            return f"{minutes}m {remaining_seconds}s"
+    else:
+        hours = seconds // 3600
+        remaining_minutes = (seconds % 3600) // 60
+        if remaining_minutes == 0:
+            return f"{hours}h"
+        else:
+            return f"{hours}h {remaining_minutes}m"
+
+
 def prepare_variants_by_funnel_stage(df):
     """
     Prepara variantes agrupadas por etapa del funnel.
@@ -401,7 +434,7 @@ def prepare_variants_by_funnel_stage(df):
     return result
 
 
-def create_metric_card(metric_name, data, results, experiment_name=None, metric_subtitle=None, experiment_title=None):
+def create_metric_card(metric_name, data, results, experiment_name=None, metric_subtitle=None, experiment_title=None, analysis_mode="conversion", time_data=None):
     """
     Crea una tarjeta estilizada para una métrica A/B (2 variantes).
     Diseño idéntico al multivariante con tabla HTML y header turquesa.
@@ -414,6 +447,8 @@ def create_metric_card(metric_name, data, results, experiment_name=None, metric_
         metric_subtitle: Subtítulo de la métrica (se muestra en la barra turquesa). 
                         Si es None, usa el nombre de la métrica.
         experiment_title: (Deprecated) Usar experiment_name en su lugar. Se mantiene por compatibilidad.
+        analysis_mode: Modo de análisis ("conversion" o "time")
+        time_data: Diccionario con datos de tiempo {'baseline': seconds, 'treatment': seconds}
     """
     # Compatibilidad hacia atrás: si se pasa experiment_title pero no experiment_name, usarlo
     if experiment_name is None and experiment_title is not None:
@@ -439,9 +474,29 @@ def create_metric_card(metric_name, data, results, experiment_name=None, metric_
     if not comparison_text:
         comparison_text = metric_name
     
-    # Calcular conversiones
-    baseline_conversion = (baseline.get('x', 0) / baseline.get('n', 1)) * 100 if baseline.get('n', 0) > 0 else 0
-    treatment_conversion = (treatment.get('x', 0) / treatment.get('n', 1)) * 100 if treatment.get('n', 0) > 0 else 0
+    # Determinar si estamos en modo tiempo o conversión
+    is_time_mode = analysis_mode == "time" and time_data is not None
+    
+    # Calcular conversiones o tiempo según el modo
+    if is_time_mode:
+        baseline_value = time_data.get('baseline')
+        treatment_value = time_data.get('treatment')
+        baseline_display = format_duration(baseline_value) if baseline_value is not None else "-"
+        treatment_display = format_duration(treatment_value) if treatment_value is not None else "-"
+        
+        # Calcular diferencia de tiempo (en segundos)
+        if baseline_value is not None and treatment_value is not None:
+            time_diff_seconds = treatment_value - baseline_value
+            time_diff_percent = ((treatment_value - baseline_value) / baseline_value * 100) if baseline_value > 0 else 0
+        else:
+            time_diff_seconds = 0
+            time_diff_percent = 0
+    else:
+        # Modo conversión (comportamiento original)
+        baseline_conversion = (baseline.get('x', 0) / baseline.get('n', 1)) * 100 if baseline.get('n', 0) > 0 else 0
+        treatment_conversion = (treatment.get('x', 0) / treatment.get('n', 1)) * 100 if treatment.get('n', 0) > 0 else 0
+        baseline_display = f"{baseline_conversion:.2f}%"
+        treatment_display = f"{treatment_conversion:.2f}%"
     
     # Determinar los porcentajes P2BB y redondearlos
     v1_percentage = round(results['p2bb'] * 100)
@@ -455,8 +510,20 @@ def create_metric_card(metric_name, data, results, experiment_name=None, metric_
     
     p2bb_bar_treatment = f"""<div style="position: relative; width: 120px; height: 28px; background: white; border-radius: 14px; margin: 0 auto; overflow: hidden; border: 1px solid #E0E6ED;"><div style="width: {v1_percentage}%; height: 100%; background: #00AEC7; border-radius: 14px; position: absolute; top: 0; left: 0;"></div><span style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: {p2bb_text_color_treatment}; font-weight: 600; font-size: 13px; z-index: 1;">{v1_percentage}%</span></div>"""
     
-    improvement_sign = "+" if results['relative_lift'] > 0 else ""
-    improvement_color = '#27AE60' if results['relative_lift'] > 0 else '#E74C3C'
+    # Determinar signo y color según el modo
+    if is_time_mode:
+        # En modo tiempo: menos tiempo es mejor (verde), más tiempo es peor (rojo)
+        # time_diff_seconds negativo = mejor (variant más rápido)
+        improvement_sign = "" if time_diff_percent == 0 else ("-" if time_diff_percent < 0 else "+")
+        improvement_value = abs(time_diff_percent)
+        improvement_color = '#27AE60' if time_diff_percent < 0 else '#E74C3C'  # Invertido: negativo = verde
+        improvement_display = f"{improvement_sign}{improvement_value:.1f}%"
+    else:
+        # Modo conversión (comportamiento original)
+        improvement_sign = "+" if results['relative_lift'] > 0 else ""
+        improvement_color = '#27AE60' if results['relative_lift'] > 0 else '#E74C3C'
+        improvement_value = results['relative_lift']
+        improvement_display = f"{improvement_sign}{improvement_value:.1f}%"
     
     # Crear filas de la tabla (igual estructura que multivariante)
     table_rows = f"""
@@ -471,7 +538,7 @@ def create_metric_card(metric_name, data, results, experiment_name=None, metric_
             {baseline.get('x', 0):,}
         </td>
         <td style="padding: 16px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: white;">
-            {baseline_conversion:.2f}%
+            {baseline_display}
         </td>
         <td style="padding: 16px 20px; text-align: center; background: white;">
             {p2bb_bar_baseline}
@@ -494,13 +561,13 @@ def create_metric_card(metric_name, data, results, experiment_name=None, metric_
             {treatment.get('x', 0):,}
         </td>
         <td style="padding: 16px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: white;">
-            {treatment_conversion:.2f}%
+            {treatment_display}
         </td>
         <td style="padding: 16px 20px; text-align: center; background: white;">
             {p2bb_bar_treatment}
         </td>
         <td style="padding: 16px 20px; text-align: center; font-weight: 600; color: {improvement_color}; font-size: 15px; background: white;">
-            {improvement_sign}{results['relative_lift']:.1f}%
+            {improvement_display}
         </td>
         <td style="padding: 16px 20px; text-align: center; font-weight: 600; color: {improvement_color if results['p_value'] < 0.05 else '#1B365D'}; font-size: 15px; background: white;">
             {results['p_value']:.5f}
@@ -516,15 +583,18 @@ def create_metric_card(metric_name, data, results, experiment_name=None, metric_
     # Si no se proporciona metric_subtitle, usar el nombre de la métrica
     subtitle_text = metric_subtitle if metric_subtitle else comparison_text
     
+    # Determinar encabezado de columna según el modo
+    conversion_header = "Tiempo Mediano" if is_time_mode else "% Conversión"
+    
     # HTML completo con la misma estructura que multivariante (en una sola línea)
     # Estilos optimizados: barra azul oscura ultra-delgada y compacta
-    card_html = f"""<div id="result-card-{hash(metric_name)}" style="background: white; border-radius: 16px; margin: 20px auto; box-shadow: 0 8px 32px rgba(0,0,0,0.12); max-width: 1000px; width: 100%; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;"><style>.no-borders-table{{border:none!important;}}.no-borders-table th{{border:none!important;outline:none!important;}}.no-borders-table td{{border:none!important;outline:none!important;}}.no-borders-table tr{{border:none!important;outline:none!important;}}</style><div style="background: #00AEC7; padding: 12px 24px; display: flex; align-items: center; gap: 16px;"><div style="background: #1B365D; color: white; padding: 6px 15px; border-radius: 16px; font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; margin: 0; line-height: 1.2; display: flex; align-items: center; white-space: nowrap;">{badge_text}</div><div style="color: white; font-weight: 600; font-size: 18px; flex: 1; margin: 0; line-height: 1.2;">{subtitle_text}</div></div><table class="no-borders-table" style="width: 100%; border-collapse: collapse; border: none;"><thead><tr style="background: #F8FAFB;"><th style="padding: 18px 20px; text-align: left; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">Variante</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">Sesiones</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">Conversiones</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">% Conversión</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">P2BB</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">% Improvement</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">P-value</th></tr></thead><tbody>{table_rows}</tbody></table></div>"""
+    card_html = f"""<div id="result-card-{hash(metric_name)}" style="background: white; border-radius: 16px; margin: 20px auto; box-shadow: 0 8px 32px rgba(0,0,0,0.12); max-width: 1000px; width: 100%; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;"><style>.no-borders-table{{border:none!important;}}.no-borders-table th{{border:none!important;outline:none!important;}}.no-borders-table td{{border:none!important;outline:none!important;}}.no-borders-table tr{{border:none!important;outline:none!important;}}</style><div style="background: #00AEC7; padding: 12px 24px; display: flex; align-items: center; gap: 16px;"><div style="background: #1B365D; color: white; padding: 6px 15px; border-radius: 16px; font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; margin: 0; line-height: 1.2; display: flex; align-items: center; white-space: nowrap;">{badge_text}</div><div style="color: white; font-weight: 600; font-size: 18px; flex: 1; margin: 0; line-height: 1.2;">{subtitle_text}</div></div><table class="no-borders-table" style="width: 100%; border-collapse: collapse; border: none;"><thead><tr style="background: #F8FAFB;"><th style="padding: 18px 20px; text-align: left; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">Variante</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">Sesiones</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">Conversiones</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">{conversion_header}</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">P2BB</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">% Improvement</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">P-value</th></tr></thead><tbody>{table_rows}</tbody></table></div>"""
     
     # Usar components.html para mejor renderizado de HTML complejo
     components.html(card_html, height=400, scrolling=False)
 
 
-def create_multivariant_card(metric_name, variants, experiment_name=None, metric_subtitle=None, chi_square_result=None):
+def create_multivariant_card(metric_name, variants, experiment_name=None, metric_subtitle=None, chi_square_result=None, analysis_mode="conversion", time_data=None):
     """
     Crea una tarjeta estilizada para múltiples variantes (A/B/N).
     Diseño adaptado del archivo Gradio con tabla blanca y header turquesa.
@@ -536,6 +606,8 @@ def create_multivariant_card(metric_name, variants, experiment_name=None, metric
         metric_subtitle: Subtítulo de la métrica (se muestra en la barra turquesa).
                         Si es None, usa el nombre de la métrica.
         chi_square_result: Resultado del test Chi-cuadrado global (dict con 'significant', 'p_value', etc.)
+        analysis_mode: Modo de análisis ("conversion" o "time")
+        time_data: Diccionario con datos de tiempo {variant_name: seconds}
     """
     baseline = variants[0]
     
@@ -553,11 +625,19 @@ def create_multivariant_card(metric_name, variants, experiment_name=None, metric
     if not comparison_text:
         comparison_text = metric_name
 
+    # Determinar si estamos en modo tiempo o conversión
+    is_time_mode = analysis_mode == "time" and time_data is not None
+    
     # Crear filas de la tabla
     table_rows = ""
     
     # Baseline
-    baseline_conversion = (baseline['x'] / baseline['n']) * 100 if baseline['n'] > 0 else 0
+    if is_time_mode:
+        baseline_time = time_data.get(baseline.get('name', 'control'))
+        baseline_display = format_duration(baseline_time) if baseline_time is not None else "-"
+    else:
+        baseline_conversion = (baseline['x'] / baseline['n']) * 100 if baseline['n'] > 0 else 0
+        baseline_display = f"{baseline_conversion:.2f}%"
     table_rows += f"""
     <tr>
         <td style="padding: 16px 20px; font-weight: 600; color: #1B365D; font-size: 15px; background: white; text-align: left;">
@@ -570,7 +650,7 @@ def create_multivariant_card(metric_name, variants, experiment_name=None, metric
             {baseline['x']:,}
         </td>
         <td style="padding: 16px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: white;">
-            {baseline_conversion:.2f}%
+            {baseline_display}
         </td>
         <td style="padding: 16px 20px; text-align: center; color: #6C7B7F; font-size: 15px; background: white;">
             -
@@ -587,9 +667,28 @@ def create_multivariant_card(metric_name, variants, experiment_name=None, metric
     # Variantes
     for variant in variants[1:]:
         comparison = calculate_single_comparison(baseline, variant)
-        variant_conversion = (variant['x'] / variant['n']) * 100 if variant['n'] > 0 else 0
         
-        improvement_sign = "+" if comparison['relative_lift'] > 0 else ""
+        if is_time_mode:
+            variant_time = time_data.get(variant.get('name', ''))
+            variant_display = format_duration(variant_time) if variant_time is not None else "-"
+            
+            # Calcular diferencia de tiempo
+            baseline_time = time_data.get(baseline.get('name', 'control'))
+            if baseline_time is not None and variant_time is not None:
+                time_diff_percent = ((variant_time - baseline_time) / baseline_time * 100) if baseline_time > 0 else 0
+                improvement_sign = "" if time_diff_percent == 0 else ("-" if time_diff_percent < 0 else "+")
+                improvement_value = abs(time_diff_percent)
+                improvement_color = '#27AE60' if time_diff_percent < 0 else '#E74C3C'  # Invertido: negativo = verde
+            else:
+                improvement_sign = ""
+                improvement_value = 0
+                improvement_color = '#1B365D'
+        else:
+            variant_conversion = (variant['x'] / variant['n']) * 100 if variant['n'] > 0 else 0
+            variant_display = f"{variant_conversion:.2f}%"
+            improvement_sign = "+" if comparison['relative_lift'] > 0 else ""
+            improvement_value = comparison['relative_lift']
+            improvement_color = '#27AE60' if comparison['relative_lift'] > 0 else '#E74C3C'
         p2bb_percentage = comparison['p2bb'] * 100
         
         # Crear barra de progreso para P2BB con borde visible y texto azul JetSMART
@@ -616,13 +715,13 @@ def create_multivariant_card(metric_name, variants, experiment_name=None, metric
                 {variant['x']:,}
             </td>
             <td style="padding: 16px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: white;">
-                {variant_conversion:.2f}%
+                {variant_display}
             </td>
             <td style="padding: 16px 20px; text-align: center; background: white;">
                 {p2bb_bar}
             </td>
-            <td style="padding: 16px 20px; text-align: center; font-weight: 600; color: {'#27AE60' if comparison['relative_lift'] > 0 else '#E74C3C'}; font-size: 15px; background: white;">
-                {improvement_sign}{comparison['relative_lift']:.1f}%
+            <td style="padding: 16px 20px; text-align: center; font-weight: 600; color: {improvement_color}; font-size: 15px; background: white;">
+                {improvement_sign}{improvement_value:.1f}%
             </td>
             <td style="padding: 16px 20px; text-align: center; font-weight: 600; color: {('#27AE60' if comparison['relative_lift'] > 0 else '#E74C3C') if comparison['p_value'] < 0.05 else '#1B365D'}; font-size: 15px; background: white;">
                 {comparison['p_value']:.5f}
@@ -638,9 +737,12 @@ def create_multivariant_card(metric_name, variants, experiment_name=None, metric
     # Si no se proporciona metric_subtitle, usar el nombre de la métrica
     subtitle_text = metric_subtitle if metric_subtitle else comparison_text
     
+    # Determinar encabezado de columna según el modo
+    conversion_header = "Tiempo Mediano" if is_time_mode else "% Conversión"
+    
     # HTML completo de la tarjeta con el diseño exacto de la imagen (en una sola línea para evitar problemas de renderizado)
     # Estilos optimizados: barra azul oscura ultra-delgada y compacta
-    card_html = f"""<div id="result-card-{hash(metric_name)}" style="background: white; border-radius: 16px; margin: 20px auto; box-shadow: 0 8px 32px rgba(0,0,0,0.12); max-width: 1000px; width: 100%; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;"><style>.no-borders-table{{border:none!important;}}.no-borders-table th{{border:none!important;outline:none!important;}}.no-borders-table td{{border:none!important;outline:none!important;}}.no-borders-table tr{{border:none!important;outline:none!important;}}</style><div style="background: #00AEC7; padding: 12px 24px; display: flex; align-items: center; gap: 16px;"><div style="background: #1B365D; color: white; padding: 6px 15px; border-radius: 16px; font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; margin: 0; line-height: 1.2; display: flex; align-items: center; white-space: nowrap;">{badge_text}</div><div style="color: white; font-weight: 600; font-size: 18px; flex: 1; margin: 0; line-height: 1.2;">{subtitle_text}</div></div><table class="no-borders-table" style="width: 100%; border-collapse: collapse; border: none;"><thead><tr style="background: #F8FAFB;"><th style="padding: 18px 20px; text-align: left; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">Variante</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">Sesiones</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">Conversiones</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">% Conversión</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">P2BB</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">% Improvement</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">P-value</th></tr></thead><tbody>{table_rows}</tbody></table></div>"""
+    card_html = f"""<div id="result-card-{hash(metric_name)}" style="background: white; border-radius: 16px; margin: 20px auto; box-shadow: 0 8px 32px rgba(0,0,0,0.12); max-width: 1000px; width: 100%; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;"><style>.no-borders-table{{border:none!important;}}.no-borders-table th{{border:none!important;outline:none!important;}}.no-borders-table td{{border:none!important;outline:none!important;}}.no-borders-table tr{{border:none!important;outline:none!important;}}</style><div style="background: #00AEC7; padding: 12px 24px; display: flex; align-items: center; gap: 16px;"><div style="background: #1B365D; color: white; padding: 6px 15px; border-radius: 16px; font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; margin: 0; line-height: 1.2; display: flex; align-items: center; white-space: nowrap;">{badge_text}</div><div style="color: white; font-weight: 600; font-size: 18px; flex: 1; margin: 0; line-height: 1.2;">{subtitle_text}</div></div><table class="no-borders-table" style="width: 100%; border-collapse: collapse; border: none;"><thead><tr style="background: #F8FAFB;"><th style="padding: 18px 20px; text-align: left; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">Variante</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">Sesiones</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">Conversiones</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">{conversion_header}</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">P2BB</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">% Improvement</th><th style="padding: 18px 20px; text-align: center; font-weight: 600; color: #1B365D; font-size: 15px; background: #F8FAFB;">P-value</th></tr></thead><tbody>{table_rows}</tbody></table></div>"""
     
     # Usar components.html para mejor renderizado de HTML complejo
     components.html(card_html, height=400, scrolling=False)
@@ -800,7 +902,7 @@ def create_segmentation_table_html(data_rows):
     
     # Encabezados de la tabla
     headers = ["Segmento", "Variante", "Sesiones (Ctrl)", "Sesiones (Var)", 
-               "CR Control", "CR Variant", "Lift (%)", "P-Value", "Sig."]
+               "CR Control", "CR Variant", "Lift (%)", "P2BB", "P-Value", "Sig."]
     
     # Crear filas de la tabla
     table_rows = ""
@@ -827,6 +929,34 @@ def create_segmentation_table_html(data_rows):
         p_value_display = f"{p_value:.5f}"
         sig_display = "✅" if is_significant else "-"
         
+        # Obtener y formatear P2BB
+        p2bb_raw = row.get('P2BB', '-')
+        # Si P2BB es un string (ya formateado), usarlo directamente; si es numérico, formatearlo
+        if isinstance(p2bb_raw, (int, float)):
+            p2bb_display = f"{round(p2bb_raw * 100)}%" if p2bb_raw != '-' else "-"
+            p2bb_numeric = p2bb_raw * 100
+        elif isinstance(p2bb_raw, str):
+            p2bb_display = p2bb_raw if p2bb_raw else "-"
+            # Intentar extraer el valor numérico para el color
+            try:
+                if p2bb_raw != '-' and '%' in p2bb_raw:
+                    p2bb_numeric = float(p2bb_raw.replace('%', '').strip())
+                else:
+                    p2bb_numeric = 0
+            except (ValueError, AttributeError):
+                p2bb_numeric = 0
+        else:
+            p2bb_display = "-"
+            p2bb_numeric = 0
+        
+        # Color para P2BB: azul si > 50%, naranja si <= 50%, gris si es "-"
+        if p2bb_display == "-":
+            p2bb_color = '#1B365D'
+        elif p2bb_numeric > 50:
+            p2bb_color = '#1565C0'
+        else:
+            p2bb_color = '#E65100'
+        
         table_rows += f"""
         <tr>
             <td style="padding: 12px 16px; font-weight: 500; color: #1B365D; font-size: 14px; background: white; text-align: left; border-bottom: 1px solid #E0E6ED;">
@@ -850,6 +980,9 @@ def create_segmentation_table_html(data_rows):
             <td style="padding: 12px 16px; font-weight: 600; color: {improvement_color}; font-size: 14px; background: white; text-align: center; border-bottom: 1px solid #E0E6ED;">
                 {lift_display}
             </td>
+            <td style="padding: 12px 16px; font-weight: 600; color: {p2bb_color}; font-size: 14px; background: white; text-align: center; border-bottom: 1px solid #E0E6ED;">
+                {p2bb_display}
+            </td>
             <td style="padding: 12px 16px; font-weight: 600; color: {p_value_color}; font-size: 14px; background: white; text-align: center; border-bottom: 1px solid #E0E6ED;">
                 {p_value_display}
             </td>
@@ -872,6 +1005,7 @@ def create_segmentation_table_html(data_rows):
                     <th style="padding: 14px 16px; text-align: center; font-weight: 600; color: #1B365D; font-size: 14px; border-bottom: 2px solid #E0E6ED;">CR Control</th>
                     <th style="padding: 14px 16px; text-align: center; font-weight: 600; color: #1B365D; font-size: 14px; border-bottom: 2px solid #E0E6ED;">CR Variant</th>
                     <th style="padding: 14px 16px; text-align: center; font-weight: 600; color: #1B365D; font-size: 14px; border-bottom: 2px solid #E0E6ED;">Lift (%)</th>
+                    <th style="padding: 14px 16px; text-align: center; font-weight: 600; color: #1B365D; font-size: 14px; border-bottom: 2px solid #E0E6ED;">P2BB</th>
                     <th style="padding: 14px 16px; text-align: center; font-weight: 600; color: #1B365D; font-size: 14px; border-bottom: 2px solid #E0E6ED;">P-Value</th>
                     <th style="padding: 14px 16px; text-align: center; font-weight: 600; color: #1B365D; font-size: 14px; border-bottom: 2px solid #E0E6ED;">Sig.</th>
                 </tr>

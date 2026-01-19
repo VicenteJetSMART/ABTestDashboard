@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 from io import BytesIO
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, date
 
 import streamlit as st
 import pandas as pd
@@ -18,7 +19,9 @@ from src.utils.experiment_utils import (
     get_variant_funnel,
     get_variant_funnel_cum,
     get_experiment_variants,
-    clear_amplitude_cache
+    clear_amplitude_cache,
+    get_all_variants_raw_data,
+    extract_median_time_from_response
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -409,6 +412,91 @@ def run_ui():
                     st.session_state['selected_row_sidebar'] = selected_row_sidebar
                     st.session_state['selected_row_original_sidebar'] = selected_row_original_sidebar
                     
+                    # ============================================================
+                    # FILTRO DE FECHAS DINÁMICO
+                    # ============================================================
+                    st.divider()
+                    st.subheader("📅 Rango de Fechas de Análisis")
+                    
+                    # Obtener fechas del experimento
+                    start_date_raw = selected_row_original_sidebar.get('startDate', None)
+                    end_date_raw = selected_row_original_sidebar.get('endDate', None)
+                    
+                    # Calcular min_date (fecha de inicio del experimento)
+                    try:
+                        if start_date_raw is None or pd.isna(start_date_raw) or str(start_date_raw) in ['None', 'nan', '']:
+                            min_date = date.today()  # Fallback: usar hoy si no hay fecha de inicio
+                        else:
+                            start_dt = pd.to_datetime(start_date_raw)
+                            min_date = start_dt.date()
+                    except Exception:
+                        min_date = date.today()  # Fallback: usar hoy si hay error
+                    
+                    # Calcular max_date (fecha de fin del experimento o hoy si está activo)
+                    try:
+                        if end_date_raw is None or pd.isna(end_date_raw) or str(end_date_raw) in ['None', 'nan', '']:
+                            # Experimento activo o sin fecha de fin: usar hoy
+                            max_date = date.today()
+                        else:
+                            end_dt = pd.to_datetime(end_date_raw)
+                            end_date_calculated = end_dt.date()
+                            # Si la fecha de fin es futura o es hoy, usar hoy
+                            if end_date_calculated >= date.today():
+                                max_date = date.today()
+                            else:
+                                max_date = end_date_calculated
+                    except Exception:
+                        max_date = date.today()  # Fallback: usar hoy si hay error
+                    
+                    # Asegurar que min_date <= max_date
+                    if min_date > max_date:
+                        min_date = max_date
+                    
+                    # Obtener fechas seleccionadas previamente o usar el rango completo por defecto
+                    date_range_key = f"date_range_{selected_row_sidebar.get('key', 'default')}"
+                    default_start = min_date
+                    default_end = max_date
+                    
+                    # Si hay fechas guardadas en session_state para este experimento, usarlas
+                    if date_range_key in st.session_state:
+                        saved_dates = st.session_state[date_range_key]
+                        if isinstance(saved_dates, tuple) and len(saved_dates) == 2:
+                            default_start, default_end = saved_dates
+                            # Validar que las fechas guardadas estén dentro del rango válido
+                            if default_start < min_date:
+                                default_start = min_date
+                            if default_end > max_date:
+                                default_end = max_date
+                            if default_start > default_end:
+                                default_start = min_date
+                                default_end = max_date
+                    
+                    # Widget de selección de fechas
+                    selected_dates = st.date_input(
+                        "Rango de Fechas de Análisis",
+                        value=(default_start, default_end),
+                        min_value=min_date,
+                        max_value=max_date,
+                        help=f"Filtrado restringido a la duración del experimento ({min_date.strftime('%Y-%m-%d')} - {max_date.strftime('%Y-%m-%d')})",
+                        key=f"date_input_{selected_row_sidebar.get('key', 'default')}"
+                    )
+                    
+                    # Validar que se seleccionen dos fechas
+                    if isinstance(selected_dates, tuple) and len(selected_dates) == 2:
+                        start_date_selected, end_date_selected = selected_dates
+                        # Guardar en session_state
+                        st.session_state[date_range_key] = (start_date_selected, end_date_selected)
+                        st.session_state['analysis_date_range'] = (start_date_selected, end_date_selected)
+                    elif isinstance(selected_dates, date):
+                        # Solo se seleccionó una fecha, mostrar advertencia
+                        st.warning("⚠️ Por favor selecciona un rango de fechas (inicio y fin). Usando rango completo del experimento.")
+                        st.session_state[date_range_key] = (min_date, max_date)
+                        st.session_state['analysis_date_range'] = (min_date, max_date)
+                    else:
+                        # Caso inesperado, usar rango completo
+                        st.session_state[date_range_key] = (min_date, max_date)
+                        st.session_state['analysis_date_range'] = (min_date, max_date)
+                    
                     st.divider()
                     
                     # ============================================================
@@ -641,7 +729,10 @@ def run_ui():
         # ============================================================
         st.subheader("🚀 Optimización")
         if st.button("🗑️ Limpiar Caché de Amplitude", key="clear_cache_sidebar"):
+            # Limpiar caché en memoria (legacy)
             clear_amplitude_cache()
+            # Limpiar caché persistente de Streamlit
+            st.cache_data.clear()
             st.success("✅ Caché limpiado exitosamente")
             st.info("El caché acelera las consultas repetidas. Límpialo si los datos parecen desactualizados.")
         
@@ -768,42 +859,53 @@ def run_ui():
                     if metrics_to_process:
                         with st.spinner("Ejecutando análisis..."):
                             try:
-                                # Obtener fechas del experimento con precisión horaria desde el DataFrame original
-                                start_date_raw = selected_row_original.get('startDate', None)
-                                end_date_raw = selected_row_original.get('endDate', None)
+                                # Obtener fechas seleccionadas por el usuario (si existen) o usar fechas del experimento
+                                analysis_date_range = st.session_state.get('analysis_date_range', None)
                                 
-                                # Normalizar start_date: preservar hora completa si está disponible
-                                if start_date_raw is None or pd.isna(start_date_raw) or str(start_date_raw) in ['None', 'nan', '']:
-                                    start_date_quick = '2024-01-01 00:00:00'
+                                if analysis_date_range and isinstance(analysis_date_range, tuple) and len(analysis_date_range) == 2:
+                                    # Usar fechas seleccionadas por el usuario
+                                    start_date_selected, end_date_selected = analysis_date_range
+                                    
+                                    # Convertir a formato con hora para la API
+                                    start_date_quick = start_date_selected.strftime('%Y-%m-%d 00:00:00')
+                                    end_date_quick = end_date_selected.strftime('%Y-%m-%d 23:59:59')
                                 else:
-                                    # Intentar parsear la fecha manteniendo la hora si está presente
-                                    try:
-                                        start_dt = pd.to_datetime(start_date_raw)
-                                        # Si tiene hora, mantenerla; si no, usar 00:00:00
-                                        if start_dt.hour == 0 and start_dt.minute == 0 and start_dt.second == 0:
-                                            start_date_quick = start_dt.strftime('%Y-%m-%d %H:%M:%S')
-                                        else:
-                                            start_date_quick = start_dt.strftime('%Y-%m-%d %H:%M:%S')
-                                    except Exception:
-                                        # Fallback: asumir formato YYYY-MM-DD y agregar hora
-                                        start_date_quick = f"{str(start_date_raw).strip()} 00:00:00"
-                                
-                                # Normalizar end_date: preservar hora completa si está disponible
-                                if end_date_raw is None or pd.isna(end_date_raw) or str(end_date_raw) in ['None', 'nan', '']:
-                                    # Si no hay fecha de fin, usar fecha de hoy con hora 23:59:59
-                                    end_date_quick = pd.Timestamp.now().strftime('%Y-%m-%d 23:59:59')
-                                else:
-                                    # Intentar parsear la fecha manteniendo la hora si está presente
-                                    try:
-                                        end_dt = pd.to_datetime(end_date_raw)
-                                        # Si tiene hora, mantenerla; si no, usar 23:59:59 para cubrir el día completo
-                                        if end_dt.hour == 0 and end_dt.minute == 0 and end_dt.second == 0:
-                                            end_date_quick = end_dt.replace(hour=23, minute=59, second=59).strftime('%Y-%m-%d %H:%M:%S')
-                                        else:
-                                            end_date_quick = end_dt.strftime('%Y-%m-%d %H:%M:%S')
-                                    except Exception:
-                                        # Fallback: asumir formato YYYY-MM-DD y agregar hora 23:59:59
-                                        end_date_quick = f"{str(end_date_raw).strip()} 23:59:59"
+                                    # Fallback: usar fechas del experimento con precisión horaria desde el DataFrame original
+                                    start_date_raw = selected_row_original.get('startDate', None)
+                                    end_date_raw = selected_row_original.get('endDate', None)
+                                    
+                                    # Normalizar start_date: preservar hora completa si está disponible
+                                    if start_date_raw is None or pd.isna(start_date_raw) or str(start_date_raw) in ['None', 'nan', '']:
+                                        start_date_quick = '2024-01-01 00:00:00'
+                                    else:
+                                        # Intentar parsear la fecha manteniendo la hora si está presente
+                                        try:
+                                            start_dt = pd.to_datetime(start_date_raw)
+                                            # Si tiene hora, mantenerla; si no, usar 00:00:00
+                                            if start_dt.hour == 0 and start_dt.minute == 0 and start_dt.second == 0:
+                                                start_date_quick = start_dt.strftime('%Y-%m-%d %H:%M:%S')
+                                            else:
+                                                start_date_quick = start_dt.strftime('%Y-%m-%d %H:%M:%S')
+                                        except Exception:
+                                            # Fallback: asumir formato YYYY-MM-DD y agregar hora
+                                            start_date_quick = f"{str(start_date_raw).strip()} 00:00:00"
+                                    
+                                    # Normalizar end_date: preservar hora completa si está disponible
+                                    if end_date_raw is None or pd.isna(end_date_raw) or str(end_date_raw) in ['None', 'nan', '']:
+                                        # Si no hay fecha de fin, usar fecha de hoy con hora 23:59:59
+                                        end_date_quick = pd.Timestamp.now().strftime('%Y-%m-%d 23:59:59')
+                                    else:
+                                        # Intentar parsear la fecha manteniendo la hora si está presente
+                                        try:
+                                            end_dt = pd.to_datetime(end_date_raw)
+                                            # Si tiene hora, mantenerla; si no, usar 23:59:59 para cubrir el día completo
+                                            if end_dt.hour == 0 and end_dt.minute == 0 and end_dt.second == 0:
+                                                end_date_quick = end_dt.replace(hour=23, minute=59, second=59).strftime('%Y-%m-%d %H:%M:%S')
+                                            else:
+                                                end_date_quick = end_dt.strftime('%Y-%m-%d %H:%M:%S')
+                                        except Exception:
+                                            # Fallback: asumir formato YYYY-MM-DD y agregar hora 23:59:59
+                                            end_date_quick = f"{str(end_date_raw).strip()} 23:59:59"
                                 
                                 experiment_id_quick = selected_row.get('key', '')
                                 
@@ -1066,6 +1168,16 @@ def run_ui():
         else:
             experiment_id_stat = st.session_state.get('analysis_experiment_id', 'N/A')
             experiment_name_stat = st.session_state.get('analysis_experiment_name', 'N/A')
+            
+            # Selector de modo de análisis (Conversión vs Tiempo)
+            analysis_mode = st.radio(
+                "Modo de Visualización:",
+                ["Tasa de Conversión (%)", "Tiempo de Conversión (⏱️)"],
+                horizontal=True,
+                key="analysis_mode_selector",
+                help="Selecciona si deseas ver tasas de conversión o tiempo mediano de conversión"
+            )
+            st.markdown("---")
             
             # Determinar qué métrica(s) analizar
             if has_metrics_results:
@@ -1467,13 +1579,69 @@ def run_ui():
                                                 'treatment': treatment
                                             }
                                             
+                                            # Obtener datos de tiempo si el modo es "Tiempo"
+                                            time_data = None
+                                            mode_for_card = "conversion"
+                                            if analysis_mode == "Tiempo de Conversión (⏱️)":
+                                                mode_for_card = "time"
+                                                try:
+                                                    # Obtener parámetros del análisis
+                                                    analysis_params = st.session_state.get('analysis_params', {})
+                                                    if analysis_params and metric_config and 'events' in metric_config:
+                                                        # Construir event_list y event_filters_map
+                                                        metric_events = metric_config['events']
+                                                        metric_filters = metric_config.get('filters', {})
+                                                        
+                                                        # Obtener datos raw con tiempo
+                                                        all_variants_raw = get_all_variants_raw_data(
+                                                            start_date=analysis_params.get('start_date'),
+                                                            end_date=analysis_params.get('end_date'),
+                                                            experiment_id=experiment_id_stat,
+                                                            device=analysis_params.get('device', 'All'),
+                                                            culture=analysis_params.get('culture', 'All'),
+                                                            event_list=metric_events,
+                                                            conversion_window=analysis_params.get('conversion_window', 1800),
+                                                            event_filters_map=metric_filters,
+                                                            flow_type=analysis_params.get('flow_type', 'ALL'),
+                                                            bundle_profile=analysis_params.get('bundle_profile', 'ALL'),
+                                                            trip_type=analysis_params.get('trip_type', 'ALL'),
+                                                            travel_group=analysis_params.get('travel_group', 'ALL'),
+                                                            hidden_first_step=metric_config.get('hidden_first_step', False),
+                                                            include_time_data=True
+                                                        )
+                                                        
+                                                        # Extraer tiempos de cada variante
+                                                        time_data = {}
+                                                        for variant_raw in all_variants_raw:
+                                                            variant_name = variant_raw.get('Variant', '')
+                                                            if variant_name in ['control', 'baseline']:
+                                                                time_data['baseline'] = extract_median_time_from_response(
+                                                                    variant_raw.get('Data', {}), variant_name
+                                                                )
+                                                            elif variant_name in ['treatment', 'variant-1']:
+                                                                time_data['treatment'] = extract_median_time_from_response(
+                                                                    variant_raw.get('Data', {}), variant_name
+                                                                )
+                                                        
+                                                        # Si no se encontraron datos, usar None
+                                                        if not time_data.get('baseline') and not time_data.get('treatment'):
+                                                            time_data = None
+                                                            mode_for_card = "conversion"
+                                                except Exception as e:
+                                                    # Si falla, usar modo conversión
+                                                    print(f"[Warning] Error obteniendo datos de tiempo: {e}")
+                                                    time_data = None
+                                                    mode_for_card = "conversion"
+                                            
                                             # Mostrar tarjeta de métrica: Header = Experimento, Sub-header = Métrica
                                             create_metric_card(
                                                 metric_name=metric_display_name,
                                                 data=comparison_data,
                                                 results=results,
                                                 experiment_name=experiment_name_stat,
-                                                metric_subtitle=metric_display_name
+                                                metric_subtitle=metric_display_name,
+                                                analysis_mode=mode_for_card,
+                                                time_data=time_data
                                             )
                                             
                                             
@@ -1482,13 +1650,66 @@ def run_ui():
                                             # Test Chi-cuadrado global
                                             chi_square_result = calculate_chi_square_test(variants)
                                             
+                                            # Obtener datos de tiempo si el modo es "Tiempo"
+                                            time_data_multivariant = None
+                                            mode_for_card_multivariant = "conversion"
+                                            if analysis_mode == "Tiempo de Conversión (⏱️)":
+                                                mode_for_card_multivariant = "time"
+                                                try:
+                                                    # Obtener parámetros del análisis
+                                                    analysis_params = st.session_state.get('analysis_params', {})
+                                                    if analysis_params and metric_config and 'events' in metric_config:
+                                                        # Construir event_list y event_filters_map
+                                                        metric_events = metric_config['events']
+                                                        metric_filters = metric_config.get('filters', {})
+                                                        
+                                                        # Obtener datos raw con tiempo
+                                                        all_variants_raw = get_all_variants_raw_data(
+                                                            start_date=analysis_params.get('start_date'),
+                                                            end_date=analysis_params.get('end_date'),
+                                                            experiment_id=experiment_id_stat,
+                                                            device=analysis_params.get('device', 'All'),
+                                                            culture=analysis_params.get('culture', 'All'),
+                                                            event_list=metric_events,
+                                                            conversion_window=analysis_params.get('conversion_window', 1800),
+                                                            event_filters_map=metric_filters,
+                                                            flow_type=analysis_params.get('flow_type', 'ALL'),
+                                                            bundle_profile=analysis_params.get('bundle_profile', 'ALL'),
+                                                            trip_type=analysis_params.get('trip_type', 'ALL'),
+                                                            travel_group=analysis_params.get('travel_group', 'ALL'),
+                                                            hidden_first_step=metric_config.get('hidden_first_step', False),
+                                                            include_time_data=True
+                                                        )
+                                                        
+                                                        # Extraer tiempos de cada variante (mapear por nombre)
+                                                        time_data_multivariant = {}
+                                                        for variant_raw in all_variants_raw:
+                                                            variant_name = variant_raw.get('Variant', '')
+                                                            time_value = extract_median_time_from_response(
+                                                                variant_raw.get('Data', {}), variant_name
+                                                            )
+                                                            if time_value is not None:
+                                                                time_data_multivariant[variant_name] = time_value
+                                                        
+                                                        # Si no se encontraron datos, usar None
+                                                        if not time_data_multivariant:
+                                                            time_data_multivariant = None
+                                                            mode_for_card_multivariant = "conversion"
+                                                except Exception as e:
+                                                    # Si falla, usar modo conversión
+                                                    print(f"[Warning] Error obteniendo datos de tiempo para multivariante: {e}")
+                                                    time_data_multivariant = None
+                                                    mode_for_card_multivariant = "conversion"
+                                            
                                             # Mostrar tarjeta multivariante: Header = Experimento, Sub-header = Métrica
                                             create_multivariant_card(
                                                 metric_name=metric_display_name,
                                                 variants=variants,
                                                 experiment_name=experiment_name_stat,
                                                 metric_subtitle=metric_display_name,
-                                                chi_square_result=chi_square_result
+                                                chi_square_result=chi_square_result,
+                                                analysis_mode=mode_for_card_multivariant,
+                                                time_data=time_data_multivariant
                                             )
                                             
                                     else:
@@ -2147,6 +2368,9 @@ def run_ui():
                                                                 cr_variant = (variant['x'] / variant['n']) * 100 if variant['n'] > 0 else 0
                                                                 p_value = comparison['p_value']
                                                                 is_significant = comparison['significant']
+                                                                p2bb_value = comparison.get('p2bb', 0)
+                                                                # Formatear P2BB como porcentaje sin decimales
+                                                                p2bb_display = f"{round(p2bb_value * 100)}%" if p2bb_value is not None else "-"
                                                                 
                                                                 data_rows.append({
                                                                     "Segmento": segment_value,
@@ -2156,6 +2380,7 @@ def run_ui():
                                                                     "CR Control": cr_control,
                                                                     "CR Variant": cr_variant,
                                                                     "Lift (%)": comparison['relative_lift'],  # Ya está en porcentaje
+                                                                    "P2BB": p2bb_display,
                                                                     "P-Value": p_value,
                                                                     "Sig.": "✅" if is_significant else "-"
                                                                 })
@@ -2169,6 +2394,7 @@ def run_ui():
                                                                 "CR Control": cr_control,
                                                                 "CR Variant": 0.0,
                                                                 "Lift (%)": 0.0,
+                                                                "P2BB": "-",  # Control no tiene P2BB
                                                                 "P-Value": 1.0,
                                                                 "Sig.": "-"
                                                             })

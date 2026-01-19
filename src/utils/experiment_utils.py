@@ -26,6 +26,7 @@ import sys
 from io import StringIO
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
+import streamlit as st
 
 # Variable global para almacenar logs
 _logs = []
@@ -89,6 +90,65 @@ def get_credentials():
     return api_key, secret_key, management_api_key
 
 
+def extract_median_time_from_response(response_json, variant_name="control"):
+    """
+    Extrae el tiempo mediano de conversión (medianTransTimes) de la respuesta de Amplitude.
+    
+    Args:
+        response_json: Respuesta JSON de la API de Amplitude
+        variant_name: Nombre de la variante (para logging)
+        
+    Returns:
+        float: Tiempo mediano en segundos, o None si no está disponible
+    """
+    try:
+        if 'data' not in response_json:
+            return None
+        
+        data = response_json['data']
+        if isinstance(data, list) and len(data) > 0:
+            first_item = data[0]
+        elif isinstance(data, dict):
+            first_item = data
+        else:
+            return None
+        
+        # Buscar medianTransTimes en la estructura
+        # Según la documentación de Amplitude, puede estar en:
+        # - data[0].medianTransTimes (array de tiempos por paso)
+        # - data[0].dayFunnels.medianTransTimes
+        # - data[0].medianTransTimes (directo)
+        
+        median_times = None
+        
+        # Intentar extraer de diferentes ubicaciones posibles
+        if 'medianTransTimes' in first_item:
+            median_times = first_item['medianTransTimes']
+        elif 'dayFunnels' in first_item and isinstance(first_item['dayFunnels'], dict):
+            if 'medianTransTimes' in first_item['dayFunnels']:
+                median_times = first_item['dayFunnels']['medianTransTimes']
+        
+        if median_times is None:
+            return None
+        
+        # medianTransTimes es un array donde cada elemento corresponde a un paso del funnel
+        # El último elemento es el tiempo total de conversión (del primer al último paso)
+        if isinstance(median_times, list) and len(median_times) > 0:
+            # Tomar el último valor (tiempo total de conversión)
+            total_time_ms = median_times[-1]
+            # Convertir de milisegundos a segundos
+            total_time_seconds = total_time_ms / 1000.0
+            return total_time_seconds
+        elif isinstance(median_times, (int, float)):
+            # Si es un solo valor, asumir que está en milisegundos
+            return median_times / 1000.0
+        
+        return None
+    except Exception as e:
+        print(f"[Warning] Error extrayendo tiempo mediano para {variant_name}: {e}")
+        return None
+
+
 def normalize_date_for_amplitude(date_input, default_time="00:00:00", is_end_date=False):
     """
     Normaliza una fecha para enviarla a la API de Amplitude con precisión horaria.
@@ -149,7 +209,8 @@ def normalize_date_for_amplitude(date_input, default_time="00:00:00", is_end_dat
     # Formatear como YYYYMMDDHHmmss para la API de Amplitude
     return dt.strftime('%Y%m%d%H%M%S')
 
-def get_funnel_data_experiment(api_key, secret_key, start_date, end_date, experiment_id, device, variant, culture, event_list, conversion_window=1800, event_filters_map=None, flow_type="ALL", bundle_profile="ALL", trip_type="ALL", pax_adult_count="ALL", travel_group="ALL", hidden_first_step=False):
+@st.cache_data(persist="disk", show_spinner=False, ttl=86400)
+def get_funnel_data_experiment(api_key, secret_key, start_date, end_date, experiment_id, device, variant, culture, event_list, conversion_window=1800, event_filters_map=None, flow_type="ALL", bundle_profile="ALL", trip_type="ALL", pax_adult_count="ALL", travel_group="ALL", hidden_first_step=False, include_time_data=False):
 	"""
 	Obtiene datos de funnel desde la API de Amplitude para un experimento específico.
 	OPTIMIZACIÓN: Incluye caché en memoria para evitar requests duplicadas.
@@ -614,6 +675,10 @@ def get_funnel_data_experiment(api_key, secret_key, start_date, end_date, experi
 		's': [json.dumps(segment) for segment in segments],
 		
 	}
+	
+	# Si se solicita tiempo de conversión, agregar parámetro view
+	if include_time_data:
+		params['view'] = 'time_to_convert'
 
 	headers = {
 		'Authorization': f'Basic {api_key}:{secret_key}'
@@ -722,6 +787,66 @@ def get_funnel_data_experiment(api_key, secret_key, start_date, end_date, experi
 		response.raise_for_status()  # Lanza excepción si el status code indica error
 		
 		response_json = response.json()
+		
+		# ============================================================
+		# DIAGNÓSTICO: Inspección de estructura de respuesta para TTC
+		# ============================================================
+		print("\n" + "="*80)
+		print("🔍 DIAGNÓSTICO: Estructura de respuesta de Amplitude")
+		print("="*80)
+		print(f"Keys del JSON raíz: {list(response_json.keys())}")
+		
+		if 'data' in response_json:
+			data = response_json['data']
+			if isinstance(data, list) and len(data) > 0:
+				first_item = data[0]
+				print(f"\nTipo de 'data': {type(data)}")
+				print(f"Keys del primer elemento de 'data': {list(first_item.keys()) if isinstance(first_item, dict) else 'No es dict'}")
+				
+				if isinstance(first_item, dict):
+					# Inspeccionar estructura de dayFunnels
+					if 'dayFunnels' in first_item:
+						day_funnels = first_item['dayFunnels']
+						print(f"Keys de 'dayFunnels': {list(day_funnels.keys()) if isinstance(day_funnels, dict) else 'No es dict'}")
+						
+						# Buscar campos relacionados con tiempo
+						if isinstance(day_funnels, dict):
+							for key in day_funnels.keys():
+								if any(time_word in key.lower() for time_word in ['time', 'interval', 'median', 'average', 'mean', 'duration']):
+									print(f"  ⏱️  Campo relacionado con tiempo encontrado: '{key}' = {day_funnels[key]}")
+					
+					# Inspeccionar eventos
+					if 'events' in first_item:
+						events = first_item['events']
+						print(f"\nTipo de 'events': {type(events)}")
+						if isinstance(events, list) and len(events) > 0:
+							print(f"Primer evento: {events[0]}")
+							if isinstance(events[0], dict):
+								print(f"  Keys del primer evento: {list(events[0].keys())}")
+					
+					# Buscar cualquier campo que contenga 'time', 'interval', 'median', etc.
+					print(f"\n🔎 Búsqueda de campos relacionados con tiempo en el primer elemento:")
+					def search_time_fields(obj, path=""):
+						if isinstance(obj, dict):
+							for key, value in obj.items():
+								current_path = f"{path}.{key}" if path else key
+								if any(time_word in key.lower() for time_word in ['time', 'interval', 'median', 'average', 'mean', 'duration', 'step']):
+									print(f"  ⏱️  {current_path}: {value}")
+								if isinstance(value, (dict, list)):
+									search_time_fields(value, current_path)
+						elif isinstance(obj, list):
+							for i, item in enumerate(obj):
+								search_time_fields(item, f"{path}[{i}]")
+					
+					search_time_fields(first_item)
+			elif isinstance(data, dict):
+				print(f"\nTipo de 'data': dict")
+				print(f"Keys de 'data': {list(data.keys())}")
+		
+		print("="*80 + "\n")
+		# ============================================================
+		# FIN DIAGNÓSTICO
+		# ============================================================
 		
 		# Verificar si la API devolvió un error
 		if 'error' in response_json:
@@ -1112,6 +1237,7 @@ def get_control_treatment_raw_data(
     return control, treatment
 
 
+@st.cache_data(persist="disk", show_spinner=False, ttl=86400)
 def final_pipeline(start_date, end_date, experiment_id, device, culture, event_list, conversion_window=1800, event_filters_map=None, flow_type="ALL", bundle_profile="ALL", trip_type="ALL", pax_adult_count="ALL", travel_group="ALL", hidden_first_step=False):
     """
     Pipeline completo para análisis de experimentos AB Test.
@@ -1148,7 +1274,9 @@ def final_pipeline(start_date, end_date, experiment_id, device, culture, event_l
         flow_type,
         bundle_profile,
         trip_type,
-        pax_adult_count
+        pax_adult_count,
+        travel_group="ALL",  # Por defecto "ALL" si no se especifica
+        hidden_first_step=hidden_first_step
     )
 
     # Procesar cada variante
@@ -1418,6 +1546,7 @@ def get_experiment_variants_original(experiment_id):
         )
 
 
+@st.cache_data(persist="disk", show_spinner=False, ttl=86400)
 def get_all_variants_raw_data(
     start_date, 
     end_date, 
@@ -1432,7 +1561,8 @@ def get_all_variants_raw_data(
     trip_type="ALL",
     pax_adult_count="ALL",
     travel_group="ALL",
-    hidden_first_step=False
+    hidden_first_step=False,
+    include_time_data=False
 ):
     """
     Obtiene los datos raw de todas las variantes de un experimento.
@@ -1486,7 +1616,8 @@ def get_all_variants_raw_data(
             trip_type,
             pax_adult_count,
             travel_group,
-            hidden_first_step
+            hidden_first_step,
+            include_time_data
         )
         
         return {
@@ -1525,6 +1656,7 @@ def get_all_variants_raw_data(
     return all_variants_data
 
 
+@st.cache_data(persist="disk", show_spinner=False, ttl=86400)
 def final_pipeline_cumulative(start_date, end_date, experiment_id, device, culture, event_list, conversion_window=1800, event_filters_map=None, flow_type="ALL", bundle_profile="ALL", trip_type="ALL", pax_adult_count="ALL", travel_group="ALL", hidden_first_step=False):
     """
     Pipeline completo para análisis de experimentos AB Test con datos acumulados.
