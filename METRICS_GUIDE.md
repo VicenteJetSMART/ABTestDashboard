@@ -7,8 +7,9 @@ Esta guía explica cómo agregar nuevas métricas de manera fácil y organizada 
 Las métricas están organizadas por carpetas según el step del flujo de compra:
 
 ```
-📁 baggage_metrics/     # Métricas de equipaje
+📁 home/                # Métricas de home/landing
 📁 flight_metrics/      # Métricas de vuelos
+📁 baggage_metrics/     # Métricas de equipaje
 📁 seats_metrics/       # Métricas de asientos
 📁 extras_metrics/      # Métricas de extras
 📁 passengers_metrics/  # Métricas de pasajeros
