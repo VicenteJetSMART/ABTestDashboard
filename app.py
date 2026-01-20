@@ -381,14 +381,52 @@ def run_ui():
                     
                     df_exp_filtered_sidebar['variants'] = df_exp_filtered_sidebar['variants'].apply(process_variants)
                 
+                # ============================================================
+                # FILTRO POR ESTADO DEL EXPERIMENTO
+                # ============================================================
+                # Extraer estados únicos disponibles
+                if 'state' in df_exp_filtered_sidebar.columns:
+                    unique_statuses = sorted(df_exp_filtered_sidebar['state'].dropna().unique().tolist())
+                    # Filtrar valores vacíos o nulos
+                    unique_statuses = [s for s in unique_statuses if s and str(s).strip() and str(s) not in ['None', 'nan', '']]
+                else:
+                    unique_statuses = []
+                
+                # Widget de filtro por estado
+                if len(unique_statuses) > 0:
+                    filter_status = st.multiselect(
+                        "🔍 Filtrar por Estado:",
+                        options=unique_statuses,
+                        default=[],
+                        help="Deja vacío para ver todos los experimentos. Selecciona uno o más estados para filtrar.",
+                        key="filter_status_sidebar"
+                    )
+                else:
+                    filter_status = []
+                
+                # Aplicar filtro por estado
+                if len(filter_status) > 0:
+                    df_exp_filtered_by_status = df_exp_filtered_sidebar[
+                        df_exp_filtered_sidebar['state'].isin(filter_status)
+                    ].copy()
+                else:
+                    df_exp_filtered_by_status = df_exp_filtered_sidebar.copy()
+                
+                # Validar si hay experimentos después del filtro
+                if len(df_exp_filtered_by_status) == 0:
+                    st.warning("⚠️ No hay experimentos con el estado seleccionado. Por favor, ajusta el filtro.")
+                    # Detener ejecución aquí para evitar errores
+                    st.stop()
+                
                 # Selector de experimento
-                if len(df_exp_filtered_sidebar) > 0:
+                if len(df_exp_filtered_by_status) > 0:
                     experiment_options_sidebar = []
-                    for idx, row in df_exp_filtered_sidebar.iterrows():
+                    for idx, row in df_exp_filtered_by_status.iterrows():
                         exp_name = row.get('name', f"Experiment {idx}")
                         exp_key = row.get('key', '')
                         exp_state = row.get('state', '')
                         display_name = f"{exp_name} ({exp_key}) - {exp_state}"
+                        # El índice se mantiene del DataFrame original al filtrar
                         experiment_options_sidebar.append((display_name, idx))
                     
                     selected_exp_display_sidebar = st.selectbox(
@@ -401,12 +439,14 @@ def run_ui():
                     # Obtener el índice del experimento seleccionado
                     try:
                         selected_exp_idx_sidebar = next(opt[1] for opt in experiment_options_sidebar if opt[0] == selected_exp_display_sidebar)
-                        selected_row_sidebar = df_exp_filtered_sidebar.iloc[selected_exp_idx_sidebar]
-                        selected_row_original_sidebar = df_exp_sidebar.iloc[selected_exp_idx_sidebar]
-                    except StopIteration:
+                        # Usar .loc para acceder por índice (que se mantiene del DataFrame original)
+                        selected_row_sidebar = df_exp_filtered_sidebar.loc[selected_exp_idx_sidebar]
+                        selected_row_original_sidebar = df_exp_sidebar.loc[selected_exp_idx_sidebar]
+                    except (StopIteration, KeyError):
+                        # Fallback: usar el primer experimento disponible
                         selected_exp_idx_sidebar = experiment_options_sidebar[0][1]
-                        selected_row_sidebar = df_exp_filtered_sidebar.iloc[selected_exp_idx_sidebar]
-                        selected_row_original_sidebar = df_exp_sidebar.iloc[selected_exp_idx_sidebar]
+                        selected_row_sidebar = df_exp_filtered_sidebar.loc[selected_exp_idx_sidebar]
+                        selected_row_original_sidebar = df_exp_sidebar.loc[selected_exp_idx_sidebar]
                     
                     # Guardar en session_state inmediatamente
                     st.session_state['selected_row_sidebar'] = selected_row_sidebar
