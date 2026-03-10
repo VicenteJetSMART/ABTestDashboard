@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 from io import BytesIO
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 
 import streamlit as st
 import pandas as pd
@@ -21,7 +21,9 @@ from src.utils.experiment_utils import (
     get_experiment_variants,
     clear_amplitude_cache,
     get_all_variants_raw_data,
-    extract_median_time_from_response
+    extract_median_time_from_response,
+    get_variant_volumes_overall,
+    filter_active_variants,
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -492,53 +494,81 @@ def run_ui():
                     if min_date > max_date:
                         min_date = max_date
                     
-                    # Obtener fechas seleccionadas previamente o usar el rango completo por defecto
+                    # Definir si el experimento está activo (para "hoy relativo") y clave de rango por experimento
                     date_range_key = f"date_range_{selected_row_sidebar.get('key', 'default')}"
-                    default_start = min_date
-                    default_end = max_date
-                    
-                    # Si hay fechas guardadas en session_state para este experimento, usarlas
-                    if date_range_key in st.session_state:
-                        saved_dates = st.session_state[date_range_key]
-                        if isinstance(saved_dates, tuple) and len(saved_dates) == 2:
-                            default_start, default_end = saved_dates
-                            # Validar que las fechas guardadas estén dentro del rango válido
-                            if default_start < min_date:
-                                default_start = min_date
-                            if default_end > max_date:
-                                default_end = max_date
-                            if default_start > default_end:
-                                default_start = min_date
-                                default_end = max_date
-                    
-                    # Widget de selección de fechas
-                    selected_dates = st.date_input(
-                        "Rango de Fechas de Análisis",
-                        value=(default_start, default_end),
-                        min_value=min_date,
-                        max_value=max_date,
-                        help=f"Filtrado restringido a la duración del experimento ({min_date.strftime('%Y-%m-%d')} - {max_date.strftime('%Y-%m-%d')})",
-                        key=f"date_input_{selected_row_sidebar.get('key', 'default')}"
-                    )
-                    
-                    # Validar que se seleccionen dos fechas
-                    if isinstance(selected_dates, tuple) and len(selected_dates) == 2:
-                        start_date_selected, end_date_selected = selected_dates
-                        # Guardar en session_state
-                        st.session_state[date_range_key] = (start_date_selected, end_date_selected)
-                        st.session_state['analysis_date_range'] = (start_date_selected, end_date_selected)
-                    elif isinstance(selected_dates, date):
-                        # Solo se seleccionó una fecha, mostrar advertencia
-                        st.warning("⚠️ Por favor selecciona un rango de fechas (inicio y fin). Usando rango completo del experimento.")
-                        st.session_state[date_range_key] = (min_date, max_date)
-                        st.session_state['analysis_date_range'] = (min_date, max_date)
-                    else:
-                        # Caso inesperado, usar rango completo
-                        st.session_state[date_range_key] = (min_date, max_date)
-                        st.session_state['analysis_date_range'] = (min_date, max_date)
-                    
+                    is_running = (max_date == date.today())
+                    end_date_calculated = max_date  # Fecha fin oficial cuando no está activo
+
                     st.divider()
-                    
+
+                    # 1. Toggle de Rollback
+                    modo_rollback = st.toggle(
+                        "🔓 Modo Rollback (desbloquear fechas)",
+                        value=False,
+                        key=f"modo_rollback_{selected_row_sidebar.get('key', 'default')}",
+                        help="Permite analizar fechas post-experimento."
+                    )
+
+                    # 2. Calcular "Hoy Relativo"
+                    hoy_relativo = date.today() if (is_running or modo_rollback) else end_date_calculated
+
+                    # 3. Selector de Modo
+                    date_mode = st.selectbox(
+                        "Modo de selección de fechas:",
+                        ["Between", "Last", "Since"],
+                        key=f"date_mode_{selected_row_sidebar.get('key', 'default')}"
+                    )
+
+                    # 4. Inputs Condicionales
+                    if date_mode == "Between":
+                        max_val = hoy_relativo if not modo_rollback else date.today()
+                        fechas_seleccionadas = st.date_input(
+                            "Selecciona el rango:",
+                            value=(min_date, hoy_relativo),
+                            min_value=min_date,
+                            max_value=max_val,
+                            key=f"date_input_between_{selected_row_sidebar.get('key', 'default')}"
+                        )
+                        if isinstance(fechas_seleccionadas, tuple) and len(fechas_seleccionadas) == 2:
+                            final_start_date, final_end_date = fechas_seleccionadas
+                        else:
+                            final_start_date = final_end_date = min_date
+
+                    elif date_mode == "Last":
+                        dias = st.number_input(
+                            "Últimos X días completos:",
+                            min_value=1,
+                            max_value=90,
+                            value=7,
+                            key=f"date_last_days_{selected_row_sidebar.get('key', 'default')}"
+                        )
+                        final_end_date = hoy_relativo
+                        final_start_date = max(min_date, hoy_relativo - timedelta(days=dias))
+
+                    elif date_mode == "Since":
+                        desde_fecha = st.date_input(
+                            "Desde la fecha:",
+                            value=min_date,
+                            min_value=min_date,
+                            max_value=hoy_relativo,
+                            key=f"date_input_since_{selected_row_sidebar.get('key', 'default')}"
+                        )
+                        final_start_date = desde_fecha if isinstance(desde_fecha, date) else min_date
+                        final_end_date = hoy_relativo
+
+                    st.caption(f"📊 Rango efectivo a consultar: **{final_start_date}** a **{final_end_date}**")
+
+                    # Guardar en session_state para el flujo de análisis y la API
+                    st.session_state[date_range_key] = (final_start_date, final_end_date)
+                    st.session_state['analysis_date_range'] = (final_start_date, final_end_date)
+
+                    st.divider()
+
+                    # Las variantes fantasma (rollback) se filtran automáticamente antes de las llamadas a la API;
+                    # no es necesario ocultarlas manualmente en el sidebar.
+
+                    st.divider()
+
                     # ============================================================
                     # FILTROS PRINCIPALES (Visibles directamente)
                     # ============================================================
@@ -557,6 +587,18 @@ def run_ui():
                         default=[],
                         key="culture_quick",
                         help="Cultura/país a analizar. INTER incluye: BR, UY, PY, EC, US, DO. Deja vacío para ver todos."
+                    )
+                    # País (propiedad nativa de usuario en Amplitude)
+                    country_options = [
+                        "Chile", "Argentina", "Peru", "Colombia", "Brazil",
+                        "Uruguay", "Paraguay", "Ecuador", "United States", "Dominican Republic"
+                    ]
+                    country_quick = st.multiselect(
+                        "🌐 Country",
+                        options=country_options,
+                        default=[],
+                        key="country_quick",
+                        help="Filtro por país (propiedad nativa de Amplitude). Deja vacío para ver todos."
                     )
                     flow_type_quick = st.multiselect(
                         "🔄 Tipo de Flujo",
@@ -948,14 +990,50 @@ def run_ui():
                                             end_date_quick = f"{str(end_date_raw).strip()} 23:59:59"
                                 
                                 experiment_id_quick = selected_row.get('key', '')
-                                
-                                # Obtener variantes del experimento para mostrar información
+
+                                # Obtener variantes del experimento
                                 experiment_variants = get_experiment_variants(experiment_id_quick)
-                                
+
+                                # Filtrar variantes activas ANTES de las llamadas a la API (evita consultar variantes fantasma en rollbacks)
+                                active_variants = list(experiment_variants)
+                                if metrics_to_process and experiment_variants:
+                                    first_metric = metrics_to_process[0]
+                                    first_events = first_metric.get('events', [])
+                                    if first_events:
+                                        first_event = first_events[0]
+                                        first_event_name = first_event[0] if isinstance(first_event, tuple) and len(first_event) > 0 else first_event
+                                        first_event_list = [first_event_name]
+                                        first_filters = first_metric.get('filters', {}) or {}
+                                        try:
+                                            volumes = get_variant_volumes_overall(
+                                                experiment_id=experiment_id_quick,
+                                                start_date=start_date_quick,
+                                                end_date=end_date_quick,
+                                                event_list=first_event_list,
+                                                conversion_window=conversion_window_quick,
+                                                event_filters_map=first_filters if first_filters else None,
+                                                flow_type=flow_type_quick,
+                                                bundle_profile=bundle_profile_quick,
+                                                trip_type=trip_type_quick,
+                                                pax_adult_count=st.session_state.get('pax_adult_count_quick', 'ALL'),
+                                                travel_group=travel_group_quick,
+                                                country=st.session_state.get('country_quick'),
+                                                hidden_first_step=first_metric.get('hidden_first_step', False),
+                                            )
+                                            active_variants = filter_active_variants(
+                                                experiment_variants,
+                                                volumes,
+                                                min_sessions=50,
+                                                min_pct_of_control=0.01,
+                                            )
+                                        except Exception as e:
+                                            print(f"[Warning] No se pudo filtrar variantes por volumen: {e}. Se usan todas.")
+                                active_variants_tuple = tuple(active_variants)
+
                                 # Diccionario para almacenar resultados por métrica
                                 metrics_results = {}
                                 
-                                # Procesar cada métrica por separado
+                                # Procesar cada métrica por separado (solo variantes activas → menos llamadas API)
                                 progress_bar = st.progress(0)
                                 total_metrics = len(metrics_to_process)
                                 
@@ -967,19 +1045,21 @@ def run_ui():
                                     # Actualizar progreso
                                     progress_bar.progress((idx + 1) / total_metrics)
                                     
-                                    # Ejecutar pipeline para esta métrica
+                                    # Ejecutar pipeline para esta métrica (solo variantes activas)
                                     pipeline_kwargs = {
                                         'start_date': start_date_quick,
                                         'end_date': end_date_quick,
                                         'experiment_id': experiment_id_quick,
                                         'device': device_quick,
                                         'culture': culture_quick,
+                                        'country': st.session_state.get('country_quick', []),
                                         'event_list': metric_events,
                                         'conversion_window': conversion_window_quick,
                                         'flow_type': flow_type_quick,
                                         'bundle_profile': bundle_profile_quick,
                                         'trip_type': trip_type_quick,
-                                        'travel_group': travel_group_quick
+                                        'travel_group': travel_group_quick,
+                                        'active_variants': active_variants_tuple,
                                     }
                                     
                                     # Agregar event_filters_map solo si existe y no está vacío
@@ -1036,12 +1116,14 @@ def run_ui():
                                     'experiment_id': experiment_id_quick,
                                     'device': normalize_filter_value(device_quick),
                                     'culture': normalize_filter_value(culture_quick),
+                                    'country': normalize_filter_value(st.session_state.get('country_quick', [])),
                                     'flow_type': normalize_filter_value(flow_type_quick),
                                     'bundle_profile': normalize_filter_value(bundle_profile_quick),
                                     'trip_type': normalize_filter_value(trip_type_quick),
                                     'travel_group': normalize_filter_value(travel_group_quick),
                                     'conversion_window': conversion_window_quick,
-                                    'use_cumulative': use_cumulative
+                                    'use_cumulative': use_cumulative,
+                                    'active_variants': active_variants_tuple,
                                 }
                                 
                                 # Guardar lista de métricas procesadas
@@ -1216,6 +1298,15 @@ def run_ui():
                 horizontal=True,
                 key="analysis_mode_selector",
                 help="Selecciona si deseas ver tasas de conversión o tiempo mediano de conversión"
+            )
+            # Kill switch para Time to Convert: por defecto OFF para evitar 429 (payload muy pesado)
+            # No asignar a st.session_state["analizar_ttc"]: el key del widget ya lo gestiona Streamlit
+            st.checkbox(
+                "Incluir análisis de Time to Convert (Más lento)",
+                value=False,
+                key="analizar_ttc",
+                help="Si está activo, se solicita a Amplitude el tiempo de conversión (stepTransTimeDistribution, etc.). "
+                     "Desactivado por defecto para reducir el tamaño de la respuesta y evitar errores 429."
             )
             st.markdown("---")
             
@@ -1619,26 +1710,23 @@ def run_ui():
                                                 'treatment': treatment
                                             }
                                             
-                                            # Obtener datos de tiempo si el modo es "Tiempo"
+                                            # Obtener datos de tiempo solo si el modo es "Tiempo" y el kill switch está activo
                                             time_data = None
                                             mode_for_card = "conversion"
-                                            if analysis_mode == "Tiempo de Conversión (⏱️)":
+                                            if analysis_mode == "Tiempo de Conversión (⏱️)" and st.session_state.get("analizar_ttc", False):
                                                 mode_for_card = "time"
                                                 try:
-                                                    # Obtener parámetros del análisis
                                                     analysis_params = st.session_state.get('analysis_params', {})
                                                     if analysis_params and metric_config and 'events' in metric_config:
-                                                        # Construir event_list y event_filters_map
                                                         metric_events = metric_config['events']
                                                         metric_filters = metric_config.get('filters', {})
-                                                        
-                                                        # Obtener datos raw con tiempo
                                                         all_variants_raw = get_all_variants_raw_data(
                                                             start_date=analysis_params.get('start_date'),
                                                             end_date=analysis_params.get('end_date'),
                                                             experiment_id=experiment_id_stat,
                                                             device=analysis_params.get('device', 'All'),
                                                             culture=analysis_params.get('culture', 'All'),
+                                                            country=analysis_params.get('country'),
                                                             event_list=metric_events,
                                                             conversion_window=analysis_params.get('conversion_window', 1800),
                                                             event_filters_map=metric_filters,
@@ -1647,10 +1735,9 @@ def run_ui():
                                                             trip_type=analysis_params.get('trip_type', 'ALL'),
                                                             travel_group=analysis_params.get('travel_group', 'ALL'),
                                                             hidden_first_step=metric_config.get('hidden_first_step', False),
-                                                            include_time_data=True
+                                                            include_time_data=True,
+                                                            active_variants=analysis_params.get('active_variants'),
                                                         )
-                                                        
-                                                        # Extraer tiempos de cada variante
                                                         time_data = {}
                                                         for variant_raw in all_variants_raw:
                                                             variant_name = variant_raw.get('Variant', '')
@@ -1662,13 +1749,10 @@ def run_ui():
                                                                 time_data['treatment'] = extract_median_time_from_response(
                                                                     variant_raw.get('Data', {}), variant_name
                                                                 )
-                                                        
-                                                        # Si no se encontraron datos, usar None
                                                         if not time_data.get('baseline') and not time_data.get('treatment'):
                                                             time_data = None
                                                             mode_for_card = "conversion"
                                                 except Exception as e:
-                                                    # Si falla, usar modo conversión
                                                     print(f"[Warning] Error obteniendo datos de tiempo: {e}")
                                                     time_data = None
                                                     mode_for_card = "conversion"
@@ -1690,26 +1774,23 @@ def run_ui():
                                             # Test Chi-cuadrado global
                                             chi_square_result = calculate_chi_square_test(variants)
                                             
-                                            # Obtener datos de tiempo si el modo es "Tiempo"
+                                            # Obtener datos de tiempo solo si el modo es "Tiempo" y el kill switch está activo
                                             time_data_multivariant = None
                                             mode_for_card_multivariant = "conversion"
-                                            if analysis_mode == "Tiempo de Conversión (⏱️)":
+                                            if analysis_mode == "Tiempo de Conversión (⏱️)" and st.session_state.get("analizar_ttc", False):
                                                 mode_for_card_multivariant = "time"
                                                 try:
-                                                    # Obtener parámetros del análisis
                                                     analysis_params = st.session_state.get('analysis_params', {})
                                                     if analysis_params and metric_config and 'events' in metric_config:
-                                                        # Construir event_list y event_filters_map
                                                         metric_events = metric_config['events']
                                                         metric_filters = metric_config.get('filters', {})
-                                                        
-                                                        # Obtener datos raw con tiempo
                                                         all_variants_raw = get_all_variants_raw_data(
                                                             start_date=analysis_params.get('start_date'),
                                                             end_date=analysis_params.get('end_date'),
                                                             experiment_id=experiment_id_stat,
                                                             device=analysis_params.get('device', 'All'),
                                                             culture=analysis_params.get('culture', 'All'),
+                                                            country=analysis_params.get('country'),
                                                             event_list=metric_events,
                                                             conversion_window=analysis_params.get('conversion_window', 1800),
                                                             event_filters_map=metric_filters,
@@ -1718,10 +1799,9 @@ def run_ui():
                                                             trip_type=analysis_params.get('trip_type', 'ALL'),
                                                             travel_group=analysis_params.get('travel_group', 'ALL'),
                                                             hidden_first_step=metric_config.get('hidden_first_step', False),
-                                                            include_time_data=True
+                                                            include_time_data=True,
+                                                            active_variants=analysis_params.get('active_variants'),
                                                         )
-                                                        
-                                                        # Extraer tiempos de cada variante (mapear por nombre)
                                                         time_data_multivariant = {}
                                                         for variant_raw in all_variants_raw:
                                                             variant_name = variant_raw.get('Variant', '')
@@ -1730,13 +1810,10 @@ def run_ui():
                                                             )
                                                             if time_value is not None:
                                                                 time_data_multivariant[variant_name] = time_value
-                                                        
-                                                        # Si no se encontraron datos, usar None
                                                         if not time_data_multivariant:
                                                             time_data_multivariant = None
                                                             mode_for_card_multivariant = "conversion"
                                                 except Exception as e:
-                                                    # Si falla, usar modo conversión
                                                     print(f"[Warning] Error obteniendo datos de tiempo para multivariante: {e}")
                                                     time_data_multivariant = None
                                                     mode_for_card_multivariant = "conversion"
@@ -1842,7 +1919,7 @@ def run_ui():
                     st.caption("Desglosa los resultados por diferentes dimensiones para encontrar insights ocultos")
                     
                     # Selector de desglose
-                    breakdown_options = ['Ninguno', 'Device', 'Culture', 'Flow Type', 'Trip Type', 'Flight Profile', 'Travel Group']
+                    breakdown_options = ['Ninguno', 'Device', 'Culture', 'Country', 'Flow Type', 'Trip Type', 'Flight Profile', 'Travel Group']
                     breakdown_selected = st.radio(
                         "🔍 Desglosar resultados por:",
                         options=breakdown_options,
@@ -1874,6 +1951,7 @@ def run_ui():
                             breakdown_values_map = {
                                 'Device': ['desktop', 'mobile'],  # Valores exactos de los selectores (minúsculas, sin 'ALL')
                                 'Culture': ['CL', 'AR', 'PE', 'CO', 'BR', 'UY', 'PY', 'EC', 'US', 'DO'],  # Valores exactos de los selectores (sin 'ALL')
+                                'Country': ['Chile', 'Argentina', 'Peru', 'Colombia', 'Brazil', 'Uruguay', 'Paraguay', 'Ecuador', 'United States', 'Dominican Republic'],  # Propiedad nativa Amplitude
                                 'Flow Type': ['DB', 'PB', 'CK'],  # Valores exactos de los selectores (sin 'ALL')
                                 'Trip Type': ['Solo Ida (One Way)', 'Ida y Vuelta (Round Trip)'],  # Valores exactos de los selectores (sin 'ALL')
                                 'Flight Profile': ['Vuela Ligero', 'Smart', 'Full', 'Smart + Full'],  # Valores exactos de los selectores (sin 'ALL')
@@ -1884,6 +1962,7 @@ def run_ui():
                             param_mapping = {
                                 'Device': 'device',
                                 'Culture': 'culture',
+                                'Country': 'country',
                                 'Flow Type': 'flow_type',
                                 'Trip Type': 'trip_type',
                                 'Flight Profile': 'bundle_profile',
@@ -1923,6 +2002,7 @@ def run_ui():
                                                     'experiment_id': original_params['experiment_id'],
                                                     'device': 'ALL' if original_params.get('device') == 'ALL' else original_params.get('device', 'ALL'),
                                                     'culture': 'ALL',  # Consultar con ALL para obtener todas las culturas
+                                                    'country': original_params.get('country'),
                                                     'event_list': first_metric['events'][:1] if first_metric['events'] else ['homepage_dom_loaded'],  # Solo un evento para ser rápido
                                                     'conversion_window': original_params['conversion_window'],
                                                     'flow_type': original_params.get('flow_type', 'ALL'),
@@ -2057,6 +2137,7 @@ def run_ui():
                                                         'event_list': metric_events,
                                                         'device': get_safe_param('device', 'ALL'),
                                                         'culture': get_safe_param('culture', 'ALL'),
+                                                        'country': get_safe_param('country', None),
                                                         'flow_type': get_safe_param('flow_type', 'ALL'),
                                                         'bundle_profile': get_safe_param('bundle_profile', 'ALL'),
                                                         'trip_type': get_safe_param('trip_type', 'ALL'),
@@ -2064,7 +2145,8 @@ def run_ui():
                                                         'conversion_window': original_params.get('conversion_window', 1800),
                                                         'event_filters_map': metric_filters if metric_filters else None
                                                     }
-                                                    
+                                                    if original_params.get('active_variants') is not None:
+                                                        query_params['active_variants'] = original_params['active_variants']
                                                     if metric_info.get('hidden_first_step', False):
                                                         query_params['hidden_first_step'] = True
                                                     
@@ -2083,6 +2165,8 @@ def run_ui():
                                                             query_params['culture'] = ['BR', 'UY', 'PY', 'EC', 'US', 'DO']
                                                         else:
                                                             query_params['culture'] = segment_value
+                                                    elif breakdown_selected == 'Country':
+                                                        query_params['country'] = segment_value  # Nombre de país (propiedad nativa Amplitude)
                                                     elif breakdown_selected == 'Flow Type':
                                                         query_params['flow_type'] = segment_value
                                                     elif breakdown_selected == 'Trip Type':
@@ -2301,8 +2385,8 @@ def run_ui():
                                             total_segments = len(segments_to_process)
                                             segment_results = []
                                             
-                                            with ThreadPoolExecutor(max_workers=10) as executor:
-                                                # Enviar todas las tareas en paralelo
+                                            with ThreadPoolExecutor(max_workers=2) as executor:
+                                                # Enviar tareas en paralelo (2 a la vez para no superar límite de concurrencia de Amplitude)
                                                 future_to_segment = {executor.submit(process_segment, segment_value): segment_value for segment_value in segments_to_process}
                                                 
                                                 # Recopilar resultados a medida que completan
@@ -2342,6 +2426,21 @@ def run_ui():
                                                     'INTER': 4
                                                 }
                                                 segment_results.sort(key=lambda x: culture_order.get(x.get('segment', ''), 999))
+                                            elif breakdown_selected == 'Country':
+                                                # Orden personalizado para Country (mismo orden que el selector)
+                                                country_order = {
+                                                    'Chile': 0,
+                                                    'Argentina': 1,
+                                                    'Peru': 2,
+                                                    'Colombia': 3,
+                                                    'Brazil': 4,
+                                                    'Uruguay': 5,
+                                                    'Paraguay': 6,
+                                                    'Ecuador': 7,
+                                                    'United States': 8,
+                                                    'Dominican Republic': 9
+                                                }
+                                                segment_results.sort(key=lambda x: country_order.get(x.get('segment', ''), 999))
                                             elif breakdown_selected == 'Flow Type':
                                                 # Orden personalizado para Flow Type: DB, PB, CK
                                                 flow_type_order = {'DB': 0, 'PB': 1, 'CK': 2}
@@ -2402,7 +2501,6 @@ def run_ui():
                                                             for i in range(1, len(variants)):
                                                                 variant = variants[i]
                                                                 variant_name = variant.get('name', f'Variant-{i}')
-                                                                
                                                                 comparison = calculate_single_comparison(baseline, variant)
                                                                 
                                                                 cr_variant = (variant['x'] / variant['n']) * 100 if variant['n'] > 0 else 0
@@ -2460,13 +2558,15 @@ def run_ui():
                                             elif show_cards:
                                                 # Modo Tarjetas: Renderizar tarjetas detalladas solo para segmentos seleccionados
                                                 if selected_segments_view:
-                                                    # Los resultados ya están filtrados porque solo procesamos los segmentos seleccionados
                                                     for result in segment_results:
                                                         try:
-                                                            # Renderizar tarjeta unificada con todas las variantes
+                                                            variants_segment = result.get('variants', [])
+                                                            if len(variants_segment) < 2:
+                                                                continue
+                                                            # Renderizar tarjeta unificada con todas las variantes (ya filtradas por active_variants)
                                                             create_multivariant_card(
                                                                 metric_name=metric_display_name,
-                                                                variants=result['variants'],
+                                                                variants=variants_segment,
                                                                 experiment_name=experiment_name_stat,
                                                                 metric_subtitle=result['metric_subtitle'],
                                                                 chi_square_result=None

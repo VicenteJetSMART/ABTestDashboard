@@ -15,6 +15,7 @@ from requests.auth import HTTPBasicAuth
 from datetime import datetime
 from src.utils.amplitude_filters import (
     get_culture_digital_filter, get_culture_digital_filter_multiple,
+    get_country_filter,
     get_device_type, get_device_type_multiple,
     get_flow_type_filter, get_flow_type_filter_multiple,
     get_bundle_filters, get_bundle_filters_multiple,
@@ -210,7 +211,7 @@ def normalize_date_for_amplitude(date_input, default_time="00:00:00", is_end_dat
     return dt.strftime('%Y%m%d%H%M%S')
 
 @st.cache_data(persist="disk", show_spinner=False, ttl=86400)
-def get_funnel_data_experiment(api_key, secret_key, start_date, end_date, experiment_id, device, variant, culture, event_list, conversion_window=1800, event_filters_map=None, flow_type="ALL", bundle_profile="ALL", trip_type="ALL", pax_adult_count="ALL", travel_group="ALL", hidden_first_step=False, include_time_data=False):
+def get_funnel_data_experiment(api_key, secret_key, start_date, end_date, experiment_id, device, variant, culture, event_list, conversion_window=1800, event_filters_map=None, flow_type="ALL", bundle_profile="ALL", trip_type="ALL", pax_adult_count="ALL", travel_group="ALL", country=None, hidden_first_step=False, include_time_data=False):
 	"""
 	Obtiene datos de funnel desde la API de Amplitude para un experimento específico.
 	OPTIMIZACIÓN: Incluye caché en memoria para evitar requests duplicadas.
@@ -242,7 +243,7 @@ def get_funnel_data_experiment(api_key, secret_key, start_date, end_date, experi
 	cache_key = _generate_cache_key(
 		start_date, end_date, experiment_id, device, variant, culture,
 		event_list, conversion_window, event_filters_map, flow_type,
-		bundle_profile, trip_type, pax_adult_count, travel_group, hidden_first_step
+		bundle_profile, trip_type, pax_adult_count, travel_group, country, hidden_first_step
 	)
 	
 	if cache_key in _amplitude_cache:
@@ -344,7 +345,7 @@ def get_funnel_data_experiment(api_key, secret_key, start_date, end_date, experi
 				api_key, secret_key, start_date, end_date, experiment_id,
 				device, variant, culture, sub_event_list,
 				conversion_window, sub_event_filters_map,
-				flow_type, bundle_profile, trip_type, pax_adult_count, travel_group, hidden_first_step
+				flow_type, bundle_profile, trip_type, pax_adult_count, travel_group, country, hidden_first_step
 			)
 		
 		# Ejecutar las 3 sub-métricas en paralelo usando ThreadPoolExecutor
@@ -486,6 +487,12 @@ def get_funnel_data_experiment(api_key, secret_key, start_date, end_date, experi
 					device_filter_alt = get_device_type(device)
 					if device_filter_alt and isinstance(device_filter_alt, dict):
 						segmentation_filters.append(device_filter_alt)
+
+	# Country filter (propiedad nativa de usuario en Amplitude)
+	if country:
+		country_filter = get_country_filter(country)
+		if country_filter:
+			segmentation_filters.append(country_filter)
 
 	# ============================================================
 	# CONSOLIDACIÓN: Construir lista unificada de filtros globales
@@ -1145,6 +1152,7 @@ def get_control_treatment_raw_data(
     trip_type="ALL",
     pax_adult_count="ALL",
     travel_group="ALL",
+    country=None,
     hidden_first_step=False
 ):
     """
@@ -1192,6 +1200,7 @@ def get_control_treatment_raw_data(
         trip_type,
         pax_adult_count,
         travel_group,
+        country,
         hidden_first_step
     )
     
@@ -1213,6 +1222,7 @@ def get_control_treatment_raw_data(
         trip_type,
         pax_adult_count,
         travel_group,
+        country,
         hidden_first_step
     )
     
@@ -1238,30 +1248,23 @@ def get_control_treatment_raw_data(
 
 
 @st.cache_data(persist="disk", show_spinner=False, ttl=86400)
-def final_pipeline(start_date, end_date, experiment_id, device, culture, event_list, conversion_window=1800, event_filters_map=None, flow_type="ALL", bundle_profile="ALL", trip_type="ALL", pax_adult_count="ALL", travel_group="ALL", hidden_first_step=False):
+def final_pipeline(start_date, end_date, experiment_id, device, culture, event_list, conversion_window=1800, event_filters_map=None, flow_type="ALL", bundle_profile="ALL", trip_type="ALL", pax_adult_count="ALL", travel_group="ALL", country=None, hidden_first_step=False, active_variants=None):
     """
     Pipeline completo para análisis de experimentos AB Test.
-    
+    Si se pasa active_variants, solo se solicitan datos a la API para esas variantes (evita variantes fantasma).
+
     Args:
-        start_date: Fecha de inicio (puede ser str YYYY-MM-DD, YYYY-MM-DD HH:mm:ss, ISO, o datetime)
-        end_date: Fecha de fin (puede ser str YYYY-MM-DD, YYYY-MM-DD HH:mm:ss, ISO, o datetime)
-        experiment_id: ID del experimento en Amplitude
-        device: Tipo de dispositivo ('mobile', 'desktop', 'tablet', o 'All')
-        culture: Código de cultura ('CL', 'AR', 'PE', etc., o 'All')
-        event_list: Lista de eventos a analizar
+        start_date, end_date, experiment_id, device, culture, event_list: parámetros del análisis
         conversion_window: Ventana de conversión en segundos (default: 1800)
         event_filters_map: Diccionario opcional que mapea eventos a sus filtros adicionales.
-                           Formato: {event_name: [filter1, filter2, ...]}
-        flow_type: Tipo de flujo ('DB', 'PB', 'CK', o 'ALL')
-        bundle_profile: Perfil de bundle ('ALL', 'Vuela Ligero', 'Smart', 'Full', 'Smart + Full')
-        trip_type: Tipo de viaje ('ALL', 'Solo Ida (One Way)', 'Ida y Vuelta (Round Trip)')
-        pax_adult_count: Cantidad de adultos ('ALL', '1 Adulto', '2 Adultos', '3 Adultos', '4+ Adultos')
-        hidden_first_step: Si es True, aplica "Inmunidad Contextual": solo filtra Flow/Trip/Bundle en el paso 0 (ancla)
-        
+        flow_type, bundle_profile, trip_type, pax_adult_count, travel_group: filtros
+        country: Filtro de país (propiedad nativa Amplitude)
+        hidden_first_step: Si es True, aplica "Inmunidad Contextual" en el paso 0 (ancla)
+        active_variants: Opcional. Tuple o lista de variantes a incluir; si es None, se usan todas.
+
     Returns:
-        pd.DataFrame: DataFrame combinado con datos de todas las variantes
+        pd.DataFrame: DataFrame combinado con datos de las variantes (activas o todas)
     """
-    # Obtener datos de todas las variantes
     all_variants_data = get_all_variants_raw_data(
         start_date,
         end_date,
@@ -1275,8 +1278,10 @@ def final_pipeline(start_date, end_date, experiment_id, device, culture, event_l
         bundle_profile,
         trip_type,
         pax_adult_count,
-        travel_group="ALL",  # Por defecto "ALL" si no se especifica
-        hidden_first_step=hidden_first_step
+        travel_group=travel_group,
+        country=country,
+        hidden_first_step=hidden_first_step,
+        active_variants=active_variants,
     )
 
     # Procesar cada variante
@@ -1292,6 +1297,122 @@ def final_pipeline(start_date, end_date, experiment_id, device, culture, event_l
         df_final = pd.DataFrame()
 
     return df_final
+
+
+def get_variant_volumes_overall(
+    experiment_id,
+    start_date,
+    end_date,
+    event_list,
+    conversion_window=1800,
+    event_filters_map=None,
+    flow_type="ALL",
+    bundle_profile="ALL",
+    trip_type="ALL",
+    pax_adult_count="ALL",
+    travel_group="ALL",
+    country=None,
+    hidden_first_step=False,
+):
+    """
+    Obtiene el volumen total (primer paso del funnel) por variante en la vista general (sin segmentar).
+    Se usa para filtrar variantes fantasma (rollback) antes de hacer las llamadas segmentadas a la API.
+
+    Args:
+        experiment_id: ID del experimento en Amplitude
+        start_date: Fecha de inicio
+        end_date: Fecha de fin
+        event_list: Lista de eventos (típicamente solo el primer evento / ancla para minimizar coste)
+        conversion_window, event_filters_map, flow_type, bundle_profile, trip_type,
+        pax_adult_count, travel_group, country, hidden_first_step: mismos que get_funnel_data_experiment
+
+    Returns:
+        dict: Mapeo variant_name -> total count (suma del primer paso del funnel en todos los días)
+    """
+    variants = get_experiment_variants(experiment_id)
+    api_key, secret_key, _ = get_credentials()
+
+    def _volume_for_variant(variant):
+        try:
+            resp = get_funnel_data_experiment(
+                api_key,
+                secret_key,
+                start_date,
+                end_date,
+                experiment_id,
+                "All",
+                variant,
+                "All",
+                event_list,
+                conversion_window,
+                event_filters_map,
+                flow_type,
+                bundle_profile,
+                trip_type,
+                pax_adult_count,
+                travel_group,
+                country=country,
+                hidden_first_step=hidden_first_step,
+            )
+            if not resp or "data" not in resp:
+                return variant, 0
+            data_list = resp.get("data") or []
+            if not data_list:
+                return variant, 0
+            first_group = data_list[0] if isinstance(data_list[0], dict) else {}
+            day_funnels = first_group.get("dayFunnels") or {}
+            series = day_funnels.get("series") or []
+            total = 0
+            for day_row in series:
+                if isinstance(day_row, (list, tuple)) and len(day_row) > 0:
+                    total += int(day_row[0]) if day_row[0] is not None else 0
+            return variant, total
+        except Exception:
+            return variant, 0
+
+    volumes = {}
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        future_to_v = {executor.submit(_volume_for_variant, v): v for v in variants}
+        for future in as_completed(future_to_v):
+            v, count = future.result()
+            volumes[v] = count
+    return volumes
+
+
+def filter_active_variants(
+    variant_names,
+    volumes,
+    min_sessions=50,
+    min_pct_of_control=0.01,
+):
+    """
+    Filtra la lista de variantes para quedarse solo con las "activas" (suficiente tráfico).
+    Elimina variantes fantasma típicas de rollbacks (variant-2, variant-4 con ~0 sesiones).
+
+    Args:
+        variant_names: Lista de nombres de variantes (orden típico: control, variant-1, ...)
+        volumes: dict variant_name -> total sesiones (primer paso del funnel)
+        min_sessions: Mínimo de sesiones para considerar una variante activa
+        min_pct_of_control: Mínimo ratio respecto al control (ej. 0.01 = 1%)
+
+    Returns:
+        list: Subconjunto de variant_names que son activas. Control siempre se incluye.
+    """
+    if not variant_names:
+        return []
+    control_volume = volumes.get("control", 0) or volumes.get(variant_names[0], 0)
+    active = []
+    for v in variant_names:
+        vol = volumes.get(v, 0) or 0
+        if v == "control" or v == variant_names[0]:
+            active.append(v)
+            continue
+        if vol < min_sessions:
+            continue
+        if control_volume > 0 and (vol / control_volume) < min_pct_of_control:
+            continue
+        active.append(v)
+    return active
 
 
 def get_experiments_list():
@@ -1548,11 +1669,11 @@ def get_experiment_variants_original(experiment_id):
 
 @st.cache_data(persist="disk", show_spinner=False, ttl=86400)
 def get_all_variants_raw_data(
-    start_date, 
-    end_date, 
-    experiment_id, 
-    device, 
-    culture, 
+    start_date,
+    end_date,
+    experiment_id,
+    device,
+    culture,
     event_list,
     conversion_window=1800,
     event_filters_map=None,
@@ -1561,12 +1682,16 @@ def get_all_variants_raw_data(
     trip_type="ALL",
     pax_adult_count="ALL",
     travel_group="ALL",
+    country=None,
     hidden_first_step=False,
-    include_time_data=False
+    include_time_data=False,
+    active_variants=None,
 ):
     """
-    Obtiene los datos raw de todas las variantes de un experimento.
-    
+    Obtiene los datos raw de las variantes activas de un experimento.
+    Si se pasa active_variants (tuple o lista), solo se consulta la API para esas variantes;
+    así se evitan llamadas para variantes fantasma (rollback).
+
     Args:
         start_date: Fecha de inicio (puede ser str YYYY-MM-DD, YYYY-MM-DD HH:mm:ss, ISO, o datetime)
         end_date: Fecha de fin (puede ser str YYYY-MM-DD, YYYY-MM-DD HH:mm:ss, ISO, o datetime)
@@ -1576,18 +1701,20 @@ def get_all_variants_raw_data(
         event_list: Lista de eventos a analizar
         conversion_window: Ventana de conversión en segundos (default: 1800)
         event_filters_map: Diccionario opcional que mapea eventos a sus filtros adicionales.
-                           Formato: {event_name: [filter1, filter2, ...]}
-        flow_type: Tipo de flujo ('DB', 'PB', 'CK', o 'ALL')
-        bundle_profile: Perfil de bundle ('ALL', 'Vuela Ligero', 'Smart', 'Full', 'Smart + Full')
-        trip_type: Tipo de viaje ('ALL', 'Solo Ida (One Way)', 'Ida y Vuelta (Round Trip)')
-        pax_adult_count: Cantidad de adultos ('ALL', '1 Adulto', '2 Adultos', '3 Adultos', '4+ Adultos')
-        hidden_first_step: Si es True, aplica "Inmunidad Contextual": solo filtra Flow/Trip/Bundle en el paso 0 (ancla)
-        
+        flow_type, bundle_profile, trip_type, pax_adult_count, travel_group: filtros
+        country: Filtro de país (propiedad nativa Amplitude)
+        hidden_first_step: Si es True, aplica "Inmunidad Contextual" en el paso 0
+        include_time_data: Si se incluyen datos de tiempo de conversión
+        active_variants: Opcional. Tuple o lista de nombres de variantes a consultar.
+                         Si es None, se consultan todas las variantes del experimento.
+
     Returns:
-        list: Lista de diccionarios con datos de cada variante
+        list: Lista de diccionarios con datos de cada variante (solo variantes activas si se pasó active_variants)
     """
-    # Obtener las variantes del experimento
-    variants = get_experiment_variants(experiment_id)
+    if active_variants is not None:
+        variants = list(active_variants)
+    else:
+        variants = get_experiment_variants(experiment_id)
     
     
     # Obtener credenciales
@@ -1616,6 +1743,7 @@ def get_all_variants_raw_data(
             trip_type,
             pax_adult_count,
             travel_group,
+            country,
             hidden_first_step,
             include_time_data
         )
@@ -1629,9 +1757,9 @@ def get_all_variants_raw_data(
         }
     
     # Ejecutar requests en paralelo usando ThreadPoolExecutor
-    # max_workers=10: Permite hasta 10 requests simultáneas (suficiente para la mayoría de experimentos)
+    # max_workers=2: Limitar concurrencia para no superar límite de Amplitude (5 concurrent) en desgloses por segmento
     all_variants_data = []
-    with ThreadPoolExecutor(max_workers=10) as executor:
+    with ThreadPoolExecutor(max_workers=2) as executor:
         # Crear futures para cada variante
         future_to_variant = {executor.submit(fetch_variant_data, variant): variant for variant in variants}
         
@@ -1657,30 +1785,20 @@ def get_all_variants_raw_data(
 
 
 @st.cache_data(persist="disk", show_spinner=False, ttl=86400)
-def final_pipeline_cumulative(start_date, end_date, experiment_id, device, culture, event_list, conversion_window=1800, event_filters_map=None, flow_type="ALL", bundle_profile="ALL", trip_type="ALL", pax_adult_count="ALL", travel_group="ALL", hidden_first_step=False):
+def final_pipeline_cumulative(start_date, end_date, experiment_id, device, culture, event_list, conversion_window=1800, event_filters_map=None, flow_type="ALL", bundle_profile="ALL", trip_type="ALL", pax_adult_count="ALL", travel_group="ALL", country=None, hidden_first_step=False, active_variants=None):
     """
     Pipeline completo para análisis de experimentos AB Test con datos acumulados.
-    
+    Si se pasa active_variants, solo se solicitan datos a la API para esas variantes.
+
     Args:
-        start_date: Fecha de inicio (puede ser str YYYY-MM-DD, YYYY-MM-DD HH:mm:ss, ISO, o datetime)
-        end_date: Fecha de fin (puede ser str YYYY-MM-DD, YYYY-MM-DD HH:mm:ss, ISO, o datetime)
-        experiment_id: ID del experimento en Amplitude
-        device: Tipo de dispositivo ('mobile', 'desktop', 'tablet', o 'All')
-        culture: Código de cultura ('CL', 'AR', 'PE', etc., o 'All')
-        event_list: Lista de eventos a analizar
-        conversion_window: Ventana de conversión en segundos (default: 1800)
-        event_filters_map: Diccionario opcional que mapea eventos a sus filtros adicionales.
-                           Formato: {event_name: [filter1, filter2, ...]}
-        flow_type: Tipo de flujo ('DB', 'PB', 'CK', o 'ALL')
-        bundle_profile: Perfil de bundle ('ALL', 'Vuela Ligero', 'Smart', 'Full', 'Smart + Full')
-        trip_type: Tipo de viaje ('ALL', 'Solo Ida (One Way)', 'Ida y Vuelta (Round Trip)')
-        pax_adult_count: Cantidad de adultos ('ALL', '1 Adulto', '2 Adultos', '3 Adultos', '4+ Adultos')
-        hidden_first_step: Si es True, aplica "Inmunidad Contextual": solo filtra Flow/Trip/Bundle en el paso 0 (ancla)
-        
+        start_date, end_date, experiment_id, device, culture, event_list: parámetros del análisis
+        conversion_window, event_filters_map, flow_type, bundle_profile, trip_type,
+        pax_adult_count, travel_group, country, hidden_first_step: igual que final_pipeline
+        active_variants: Opcional. Tuple o lista de variantes a incluir; si es None, se usan todas.
+
     Returns:
-        pd.DataFrame: DataFrame combinado con datos acumulados de todas las variantes
+        pd.DataFrame: DataFrame combinado con datos acumulados de las variantes (activas o todas)
     """
-    # Obtener datos de todas las variantes
     all_variants_data = get_all_variants_raw_data(
         start_date,
         end_date,
@@ -1695,7 +1813,9 @@ def final_pipeline_cumulative(start_date, end_date, experiment_id, device, cultu
         trip_type,
         pax_adult_count,
         travel_group,
-        hidden_first_step
+        country=country,
+        hidden_first_step=hidden_first_step,
+        active_variants=active_variants,
     )
 
     # Procesar cada variante con datos acumulados

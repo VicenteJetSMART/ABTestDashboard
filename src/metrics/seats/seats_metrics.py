@@ -58,6 +58,19 @@ def seats_count_filter():
     }
 
 
+def seats_count_gt_one_filter():
+    """
+    Filtro técnico para validar que el usuario avanzó con más de un asiento seleccionado.
+    Usa la propiedad 'seats_count' > 1 (evita contar quien seleccionó y luego desagregó).
+    """
+    return {
+        'subprop_type': 'event',
+        'subprop_key': 'seats_count',
+        'subprop_op': 'greater',
+        'subprop_value': [1]
+    }
+
+
 def has_seat_purchase_filter():
     """
     Filtro técnico para validar que se pagó por asientos en el paso 3 (goal).
@@ -201,13 +214,14 @@ SEATS_SMART_CR = {'events': [
 # ===== ADD TO CART (A2C) - ESTRATEGIA GHOST ANCHOR =====
 
 # Seats A2C - General (Estrategia Ghost Anchor)
-# PROBLEMA RESUELTO: Al filtrar por segmentos (ej: "Travel Group = Familia"), 
-# el evento continue_clicked_seat devuelve 0 porque NO tiene la propiedad de segmento.
-# SOLUCIÓN: Funnel de 2 pasos donde:
-# - Paso 1 (seatmap_dom_loaded): ÚNICO que recibe filtros de segmento (Family, Business, etc.)
-# - Paso 2 (continue_clicked_seat): NO recibe filtros de segmento, solo valida que se seleccionaron asientos
+# Cuenta quiénes avanzan en el flujo con asiento(s) seleccionado(s); el tercer paso evita
+# contar a quien seleccionó y luego desagregó (extras_dom_loaded con seats_count > 1).
+# - Paso 1 (seatmap_dom_loaded): ANCHOR, recibe filtros de segmento (Family, Business, etc.)
+# - Paso 2 (ce:seat_selected): Bridge, valida que se seleccionó al menos un asiento
+# - Paso 3 (extras_dom_loaded, seats_count > 1): TARGET, valida que llegó a extras con asientos en carrito
 SEATS_A2C = {'events': [
-    ('seatmap_dom_loaded', []),  # 1. ANCHOR: Aquí "muerden" los filtros globales del Dashboard (Family, Business, etc.)
-    ('ce:seat_selected', [])  # 2. TARGET: NO recibe filtros de segmento, solo valida que se seleccionaron asientos
+    ('seatmap_dom_loaded', []),  # 1. ANCHOR: Aquí "muerden" los filtros globales del Dashboard
+    ('ce:seat_selected', []),    # 2. BRIDGE: Valida que se seleccionó asiento
+    ('extras_dom_loaded', [seats_count_gt_one_filter()])  # 3. TARGET: Avanzó con al menos un asiento (seats_count > 1)
 ]}
 

@@ -31,63 +31,101 @@ def get_culture_digital_filter_multiple(country_codes):
     }
 
 def get_culture_digital_filter(country_code):
+    """
+    Mapeo de códigos de país a valores aceptados por la propiedad 'culture' (event) en Amplitude.
+    Solo nomenclaturas idioma-país (ej. es-CL, es_cl) para reducir cardinalidad y coste de queries (evitar 429).
+    No incluye códigos de 2 letras ni nombres completos de país; el desglose por Country usa get_country_filter.
+    """
     switch = {
         "CL": {
             "subprop_type": "event",
             "subprop_key": "culture",
             "subprop_op": "is",
-            "subprop_value": ["cl", "CL", "cL", "Cl", "es-CL", "CHILE", "es-cl"]
+            "subprop_value": ["es-CL", "es-cl", "es_CL", "es_cl"],
         },
         "AR": {
             "subprop_type": "event",
             "subprop_key": "culture",
             "subprop_op": "is",
-            "subprop_value": ["ar", "AR", "aR", "Ar", "es-AR", "ARGENTINA", "es-ar"]
+            "subprop_value": ["es-AR", "es-ar", "es_AR", "es_ar"],
         },
         "PE": {
             "subprop_type": "event",
             "subprop_key": "culture",
             "subprop_op": "is",
-            "subprop_value": ["pe", "PE", "pE", "Pe", "es-PE", "PERU", "es-pe"]
+            "subprop_value": ["es-PE", "es-pe", "es_PE", "es_pe"],
         },
         "CO": {
             "subprop_type": "event",
             "subprop_key": "culture",
             "subprop_op": "is",
-            "subprop_value": ["co", "CO", "cO", "Co", "es-CO", "COLOMBIA", "es-co"]
+            "subprop_value": ["es-CO", "es-co", "es_CO", "es_co"],
         },
         "BR": {
             "subprop_type": "event",
             "subprop_key": "culture",
             "subprop_op": "is",
-            "subprop_value": ["br", "BR", "bR", "Br", "pt-BR", "BRAZIL", "pt-br"]
+            "subprop_value": ["pt-BR", "pt-br", "pt_BR", "pt_br"],
         },
         "UY": {
             "subprop_type": "event",
             "subprop_key": "culture",
             "subprop_op": "is",
-            "subprop_value": ["uy", "UY", "uY", "Uy", "es-UY", "URUGUAY", "es-uy"]
+            "subprop_value": ["es-UY", "es-uy", "es_UY", "es_uy"],
         },
         "PY": {
             "subprop_type": "event",
             "subprop_key": "culture",
             "subprop_op": "is",
-            "subprop_value": ["py", "PY", "pY", "Py", "es-PY", "PARAGUAY", "es-py"]
+            "subprop_value": ["es-PY", "es-py", "es_PY", "es_py"],
         },
         "EC": {
             "subprop_type": "event",
             "subprop_key": "culture",
             "subprop_op": "is",
-            "subprop_value": ["ec", "EC", "eC", "Ec", "es-EC", "ECUADOR", "es-ec"]
+            "subprop_value": ["es-EC", "es-ec", "es_EC", "es_ec"],
         },
         "US": {
             "subprop_type": "event",
             "subprop_key": "culture",
             "subprop_op": "is",
-            "subprop_value": ["us", "US", "uS", "Us", "en-US", "UNITED STATES", "en-us"]
+            "subprop_value": ["en-US", "en-us", "en_US", "en_us"],
+        },
+        "DO": {
+            "subprop_type": "event",
+            "subprop_key": "culture",
+            "subprop_op": "is",
+            "subprop_value": ["es-DO", "es-do", "es_DO", "es_do"],
         },
     }
     return switch.get(country_code, "")
+
+
+def get_country_filter(countries_list):
+    """
+    Filtro por la propiedad nativa de usuario 'country' en Amplitude.
+    
+    Args:
+        countries_list: Lista de nombres de país (ej: ["Chile", "Argentina"]) o "ALL"/None para no filtrar
+        
+    Returns:
+        dict: Filtro para segmentation_filters, o None si la lista está vacía o es "ALL"
+    """
+    if countries_list is None:
+        return None
+    if isinstance(countries_list, str) and countries_list.strip().upper() == "ALL":
+        return None
+    if isinstance(countries_list, str):
+        countries_list = [countries_list]
+    countries_list = [c for c in countries_list if c and str(c).strip() and str(c).strip().upper() != "ALL"]
+    if not countries_list:
+        return None
+    return {
+        "subprop_type": "user",
+        "subprop_key": "country",
+        "subprop_op": "is",
+        "subprop_value": list(countries_list),
+    }
 
 def get_traffic_type(traffic_type):    
     switch = {
