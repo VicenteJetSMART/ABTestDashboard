@@ -12,7 +12,7 @@ import json
 import pandas as pd
 import requests
 from requests.auth import HTTPBasicAuth
-from datetime import datetime
+from datetime import date, datetime, time
 from src.utils.amplitude_filters import (
     get_culture_digital_filter, get_culture_digital_filter_multiple,
     get_country_filter,
@@ -209,6 +209,80 @@ def normalize_date_for_amplitude(date_input, default_time="00:00:00", is_end_dat
     
     # Formatear como YYYYMMDDHHmmss para la API de Amplitude
     return dt.strftime('%Y%m%d%H%M%S')
+
+
+def apply_time_to_datetime_string(dt_string, t):
+    """
+    Sustituye la componente horaria de una fecha/hora por la indicada en t.
+
+    Args:
+        dt_string: Cadena o valor parseable por pandas (ej. '2024-01-15 00:00:00').
+        t: datetime.time con la hora deseada, o None para no modificar.
+
+    Returns:
+        str: Fecha y hora en formato 'YYYY-MM-DD HH:MM:SS'.
+
+    Raises:
+        ValueError: Si dt_string es nulo o no parseable.
+    """
+    if dt_string is None or pd.isna(dt_string):
+        raise ValueError("La cadena de fecha/hora no puede estar vacía.")
+    dt = pd.to_datetime(dt_string)
+    if t is not None:
+        micro = getattr(t, "microsecond", 0) or 0
+        dt = dt.replace(hour=t.hour, minute=t.minute, second=t.second, microsecond=micro)
+    return dt.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def build_analysis_datetime_strings(
+    start_date_selected, end_date_selected, t_start_q, t_end_q
+):
+    """
+    Construye pares inicio/fin para el análisis rápido (rango de fechas + horas de sidebar).
+
+    Args:
+        start_date_selected: Fecha inicio (date, datetime, str o Timestamp).
+        end_date_selected: Fecha fin.
+        t_start_q: Hora de inicio (datetime.time); si es None, usa 00:00:00.
+        t_end_q: Hora de fin (datetime.time); si es None, usa 23:59:59.
+
+    Returns:
+        tuple[str, str]: (start_date_quick, end_date_quick) en 'YYYY-MM-DD HH:MM:SS'.
+
+    Raises:
+        ValueError: Si faltan fechas o inicio > fin.
+    """
+    if start_date_selected is None or pd.isna(start_date_selected):
+        raise ValueError("Selecciona una fecha de inicio para el análisis.")
+    if end_date_selected is None or pd.isna(end_date_selected):
+        raise ValueError("Selecciona una fecha de fin para el análisis.")
+
+    def _to_date(d):
+        if isinstance(d, datetime):
+            return d.date()
+        if isinstance(d, date):
+            return d
+        return pd.to_datetime(d).date()
+
+    start_d = _to_date(start_date_selected)
+    end_d = _to_date(end_date_selected)
+
+    t0 = t_start_q if t_start_q is not None else time(0, 0, 0)
+    t1 = t_end_q if t_end_q is not None else time(23, 59, 59)
+
+    start_dt = datetime.combine(start_d, t0)
+    end_dt = datetime.combine(end_d, t1)
+
+    if start_dt > end_dt:
+        raise ValueError(
+            "La fecha y hora de inicio deben ser anteriores o iguales a la de fin."
+        )
+
+    return (
+        start_dt.strftime("%Y-%m-%d %H:%M:%S"),
+        end_dt.strftime("%Y-%m-%d %H:%M:%S"),
+    )
+
 
 @st.cache_data(persist="disk", show_spinner=False, ttl=86400)
 def get_funnel_data_experiment(api_key, secret_key, start_date, end_date, experiment_id, device, variant, culture, event_list, conversion_window=1800, event_filters_map=None, flow_type="ALL", bundle_profile="ALL", trip_type="ALL", pax_adult_count="ALL", travel_group="ALL", country=None, hidden_first_step=False, include_time_data=False):

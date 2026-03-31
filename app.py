@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 from io import BytesIO
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, time
 
 import streamlit as st
 import pandas as pd
@@ -24,9 +24,66 @@ from src.utils.experiment_utils import (
     extract_median_time_from_response,
     get_variant_volumes_overall,
     filter_active_variants,
+    build_analysis_datetime_strings,
+    apply_time_to_datetime_string,
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parent
+
+
+def _dataframe_to_csv_bytes(df: pd.DataFrame, index: bool = False) -> bytes:
+    """
+    Convierte un DataFrame a CSV para st.download_button.
+    Formato Excel LATAM: sep=';', decimal=','. UTF-8 con BOM para evitar Mojibake en Excel.
+    """
+    if df is None or df.empty:
+        return b""
+    return df.to_csv(index=index, sep=";", decimal=",").encode("utf-8-sig")
+
+
+def _general_results_rows_to_export_df(rows: list) -> pd.DataFrame:
+    """
+    Convierte la lista de filas de resultados generales al DataFrame de exportación
+    con la estructura exacta de la UI. Acepta filas con nombres nuevos (Metrica, Sesiones, ...)
+    o legacy (Métrica, N, Tasa_Conversion_%, P_Value, Significativo) y siempre devuelve las 8 columnas.
+    """
+    COLUMNAS = [
+        "Metrica", "Variante", "Sesiones", "Conversiones",
+        "% Conversión", "P2BB", "% Improvement", "P-value"
+    ]
+    export_rows = []
+    for r in rows:
+        export_rows.append({
+            "Metrica": r.get("Metrica") or r.get("Métrica") or "",
+            "Variante": r.get("Variante") or "",
+            "Sesiones": r.get("Sesiones") if r.get("Sesiones") is not None else r.get("N"),
+            "Conversiones": r.get("Conversiones") if r.get("Conversiones") is not None else 0,
+            "% Conversión": r.get("% Conversión") if r.get("% Conversión") is not None else r.get("Tasa_Conversion_%"),
+            "P2BB": r.get("P2BB") if r.get("P2BB") is not None else "",
+            "% Improvement": r.get("% Improvement") if r.get("% Improvement") is not None else "",
+            "P-value": r.get("P-value") if r.get("P-value") is not None else r.get("P_Value"),
+        })
+    return pd.DataFrame(export_rows, columns=COLUMNAS)
+
+
+def _date_range_suffix_for_filename() -> str:
+    """
+    Obtiene el rango de fechas del análisis actual para usar en nombres de archivo.
+    Formato: YYYY-MM-DD_al_YYYY-MM-DD. Acepta strings (ej. '2024-01-15 00:00:00') o date/datetime.
+    """
+    def _to_yyyymmdd(value):
+        if value is None:
+            return "N/A"
+        if hasattr(value, "strftime"):
+            return value.strftime("%Y-%m-%d")
+        s = str(value).strip()
+        return s[:10] if len(s) >= 10 else (s or "N/A")
+
+    params = st.session_state.get("analysis_params", {}) or {}
+    start_clean = _to_yyyymmdd(params.get("start_date"))
+    end_clean = _to_yyyymmdd(params.get("end_date"))
+    return f"{start_clean}_al_{end_clean}"
+
 
 # ==============================================================================
 # MAPEO DE GHOST ANCHORS (Configuración Explícita)
@@ -556,11 +613,42 @@ def run_ui():
                         final_start_date = desde_fecha if isinstance(desde_fecha, date) else min_date
                         final_end_date = hoy_relativo
 
-                    st.caption(f"📊 Rango efectivo a consultar: **{final_start_date}** a **{final_end_date}**")
-
                     # Guardar en session_state para el flujo de análisis y la API
                     st.session_state[date_range_key] = (final_start_date, final_end_date)
                     st.session_state['analysis_date_range'] = (final_start_date, final_end_date)
+
+                    exp_key_time = selected_row_sidebar.get('key', 'default')
+                    col_h1, col_h2 = st.columns(2)
+                    with col_h1:
+                        st.time_input(
+                            "Hora inicio",
+                            value=time(0, 0, 0),
+                            step=60,
+                            key=f"analysis_start_time_{exp_key_time}",
+                            help=(
+                                "Se combina con la fecha de inicio del rango. "
+                                "Debe coincidir con la zona horaria del proyecto en Amplitude."
+                            ),
+                        )
+                    with col_h2:
+                        st.time_input(
+                            "Hora fin",
+                            value=time(23, 59, 59),
+                            step=60,
+                            key=f"analysis_end_time_{exp_key_time}",
+                            help="Se combina con la fecha de fin del rango.",
+                        )
+                    t_start_eff = st.session_state.get(
+                        f"analysis_start_time_{exp_key_time}", time(0, 0, 0)
+                    )
+                    t_end_eff = st.session_state.get(
+                        f"analysis_end_time_{exp_key_time}", time(23, 59, 59)
+                    )
+                    st.caption(
+                        f"📊 Rango efectivo (fecha + hora): **{final_start_date}** "
+                        f"{t_start_eff.strftime('%H:%M:%S')} → **{final_end_date}** "
+                        f"{t_end_eff.strftime('%H:%M:%S')}"
+                    )
 
                     st.divider()
 
@@ -941,55 +1029,82 @@ def run_ui():
                     if metrics_to_process:
                         with st.spinner("Ejecutando análisis..."):
                             try:
-                                # Obtener fechas seleccionadas por el usuario (si existen) o usar fechas del experimento
+                                # Rango de fechas + horas de la barra lateral (misma clave que los widgets)
+                                experiment_id_quick = selected_row.get('key', '')
+                                t_start_q = st.session_state.get(
+                                    f"analysis_start_time_{experiment_id_quick}", time(0, 0, 0)
+                                )
+                                t_end_q = st.session_state.get(
+                                    f"analysis_end_time_{experiment_id_quick}", time(23, 59, 59)
+                                )
+
                                 analysis_date_range = st.session_state.get('analysis_date_range', None)
-                                
+
                                 if analysis_date_range and isinstance(analysis_date_range, tuple) and len(analysis_date_range) == 2:
-                                    # Usar fechas seleccionadas por el usuario
                                     start_date_selected, end_date_selected = analysis_date_range
-                                    
-                                    # Convertir a formato con hora para la API
-                                    start_date_quick = start_date_selected.strftime('%Y-%m-%d 00:00:00')
-                                    end_date_quick = end_date_selected.strftime('%Y-%m-%d 23:59:59')
+                                    try:
+                                        start_date_quick, end_date_quick = build_analysis_datetime_strings(
+                                            start_date_selected,
+                                            end_date_selected,
+                                            t_start_q,
+                                            t_end_q,
+                                        )
+                                    except ValueError as err_range:
+                                        st.error(str(err_range))
+                                        st.session_state['run_analysis'] = False
+                                        st.stop()
                                 else:
-                                    # Fallback: usar fechas del experimento con precisión horaria desde el DataFrame original
+                                    # Fallback: fechas del experimento; la hora la fija el usuario en la sidebar
                                     start_date_raw = selected_row_original.get('startDate', None)
                                     end_date_raw = selected_row_original.get('endDate', None)
-                                    
-                                    # Normalizar start_date: preservar hora completa si está disponible
+
                                     if start_date_raw is None or pd.isna(start_date_raw) or str(start_date_raw) in ['None', 'nan', '']:
                                         start_date_quick = '2024-01-01 00:00:00'
                                     else:
-                                        # Intentar parsear la fecha manteniendo la hora si está presente
                                         try:
                                             start_dt = pd.to_datetime(start_date_raw)
-                                            # Si tiene hora, mantenerla; si no, usar 00:00:00
-                                            if start_dt.hour == 0 and start_dt.minute == 0 and start_dt.second == 0:
+                                            if (
+                                                start_dt.hour == 0
+                                                and start_dt.minute == 0
+                                                and start_dt.second == 0
+                                            ):
                                                 start_date_quick = start_dt.strftime('%Y-%m-%d %H:%M:%S')
                                             else:
                                                 start_date_quick = start_dt.strftime('%Y-%m-%d %H:%M:%S')
                                         except Exception:
-                                            # Fallback: asumir formato YYYY-MM-DD y agregar hora
                                             start_date_quick = f"{str(start_date_raw).strip()} 00:00:00"
-                                    
-                                    # Normalizar end_date: preservar hora completa si está disponible
+
                                     if end_date_raw is None or pd.isna(end_date_raw) or str(end_date_raw) in ['None', 'nan', '']:
-                                        # Si no hay fecha de fin, usar fecha de hoy con hora 23:59:59
                                         end_date_quick = pd.Timestamp.now().strftime('%Y-%m-%d 23:59:59')
                                     else:
-                                        # Intentar parsear la fecha manteniendo la hora si está presente
                                         try:
                                             end_dt = pd.to_datetime(end_date_raw)
-                                            # Si tiene hora, mantenerla; si no, usar 23:59:59 para cubrir el día completo
-                                            if end_dt.hour == 0 and end_dt.minute == 0 and end_dt.second == 0:
-                                                end_date_quick = end_dt.replace(hour=23, minute=59, second=59).strftime('%Y-%m-%d %H:%M:%S')
+                                            if (
+                                                end_dt.hour == 0
+                                                and end_dt.minute == 0
+                                                and end_dt.second == 0
+                                            ):
+                                                end_date_quick = end_dt.replace(
+                                                    hour=23, minute=59, second=59
+                                                ).strftime('%Y-%m-%d %H:%M:%S')
                                             else:
                                                 end_date_quick = end_dt.strftime('%Y-%m-%d %H:%M:%S')
                                         except Exception:
-                                            # Fallback: asumir formato YYYY-MM-DD y agregar hora 23:59:59
                                             end_date_quick = f"{str(end_date_raw).strip()} 23:59:59"
-                                
-                                experiment_id_quick = selected_row.get('key', '')
+
+                                    start_date_quick = apply_time_to_datetime_string(
+                                        start_date_quick, t_start_q
+                                    )
+                                    end_date_quick = apply_time_to_datetime_string(
+                                        end_date_quick, t_end_q
+                                    )
+                                    if pd.to_datetime(start_date_quick) > pd.to_datetime(end_date_quick):
+                                        st.error(
+                                            "La fecha y hora de inicio deben ser anteriores o iguales "
+                                            "a la de fin."
+                                        )
+                                        st.session_state['run_analysis'] = False
+                                        st.stop()
 
                                 # Obtener variantes del experimento
                                 experiment_variants = get_experiment_variants(experiment_id_quick)
@@ -1342,6 +1457,7 @@ def run_ui():
                         prepare_variants_from_dataframe,
                         calculate_ab_test,
                         calculate_chi_square_test,
+                        calculate_single_comparison,
                         create_metric_card,
                         create_multivariant_card
                     )
@@ -1391,6 +1507,9 @@ def run_ui():
                                         return (2, name)
                                 return (2, name)
                             return sorted(variants_list, key=get_simple_sort_key)
+                    
+                    # Acumular filas para exportación CSV de resultados generales
+                    general_results_rows = []
                     
                     # Procesar cada métrica y mostrar en su propio recuadro
                     for metric_key, df_analysis in available_metrics:
@@ -1757,6 +1876,28 @@ def run_ui():
                                                     time_data = None
                                                     mode_for_card = "conversion"
                                             
+                                            # Acumular para exportación CSV (vista usuario: 8 columnas exactas)
+                                            for v, label in [(control, "Control"), (treatment, "Treatment")]:
+                                                n, x = v.get("n", 0), v.get("x", 0)
+                                                tasa = round((x / n) * 100, 4) if n else 0
+                                                if label == "Control":
+                                                    p2bb_val = ""
+                                                    improvement_val = ""
+                                                    pval = ""
+                                                else:
+                                                    p2bb_val = round(results.get("p2bb", 0) * 100, 2) if results.get("p2bb") is not None else ""
+                                                    improvement_val = round(results.get("relative_lift", 0), 2) if results.get("relative_lift") is not None else ""
+                                                    pval = round(results["p_value"], 5) if results.get("p_value") is not None else ""
+                                                general_results_rows.append({
+                                                    "Metrica": metric_display_name,
+                                                    "Variante": v.get("name", label),
+                                                    "Sesiones": n,
+                                                    "Conversiones": x,
+                                                    "% Conversión": tasa,
+                                                    "P2BB": p2bb_val,
+                                                    "% Improvement": improvement_val,
+                                                    "P-value": pval,
+                                                })
                                             # Mostrar tarjeta de métrica: Header = Experimento, Sub-header = Métrica
                                             create_metric_card(
                                                 metric_name=metric_display_name,
@@ -1818,6 +1959,30 @@ def run_ui():
                                                     time_data_multivariant = None
                                                     mode_for_card_multivariant = "conversion"
                                             
+                                            # Acumular para exportación CSV (multivariante: P2BB y % Improvement vs control)
+                                            baseline_multi = variants[0]
+                                            for i, v in enumerate(variants):
+                                                n, x = v.get("n", 0), v.get("x", 0)
+                                                tasa = round((x / n) * 100, 4) if n else 0
+                                                if i == 0:
+                                                    p2bb_val = ""
+                                                    improvement_val = ""
+                                                    pval = round(chi_square_result["p_value"], 5) if chi_square_result and chi_square_result.get("p_value") is not None else ""
+                                                else:
+                                                    comp = calculate_single_comparison(baseline_multi, v)
+                                                    p2bb_val = round(comp.get("p2bb", 0) * 100, 2) if comp.get("p2bb") is not None else ""
+                                                    improvement_val = round(comp.get("relative_lift", 0), 2) if comp.get("relative_lift") is not None else ""
+                                                    pval = round(comp["p_value"], 5) if comp.get("p_value") is not None else ""
+                                                general_results_rows.append({
+                                                    "Metrica": metric_display_name,
+                                                    "Variante": v.get("name", ""),
+                                                    "Sesiones": n,
+                                                    "Conversiones": x,
+                                                    "% Conversión": tasa,
+                                                    "P2BB": p2bb_val,
+                                                    "% Improvement": improvement_val,
+                                                    "P-value": pval,
+                                                })
                                             # Mostrar tarjeta multivariante: Header = Experimento, Sub-header = Métrica
                                             create_multivariant_card(
                                                 metric_name=metric_display_name,
@@ -1885,7 +2050,28 @@ def run_ui():
                                         'baseline': control,
                                         'treatment': treatment
                                     }
-                                    
+                                    # Acumular para exportación CSV (sin funnel, 8 columnas exactas)
+                                    for v, label in [(control, "Control"), (treatment, "Treatment")]:
+                                        n, x = v.get("n", 0), v.get("x", 0)
+                                        tasa = round((x / n) * 100, 4) if n else 0
+                                        if label == "Control":
+                                            p2bb_val = ""
+                                            improvement_val = ""
+                                            pval = ""
+                                        else:
+                                            p2bb_val = round(results.get("p2bb", 0) * 100, 2) if results.get("p2bb") is not None else ""
+                                            improvement_val = round(results.get("relative_lift", 0), 2) if results.get("relative_lift") is not None else ""
+                                            pval = round(results["p_value"], 5) if results.get("p_value") is not None else ""
+                                        general_results_rows.append({
+                                            "Metrica": metric_display_name,
+                                            "Variante": v.get("name", label),
+                                            "Sesiones": n,
+                                            "Conversiones": x,
+                                            "% Conversión": tasa,
+                                            "P2BB": p2bb_val,
+                                            "% Improvement": improvement_val,
+                                            "P-value": pval,
+                                        })
                                     # Mostrar tarjeta de métrica: Header = Experimento, Sub-header = Métrica
                                     create_metric_card(
                                         metric_name=metric_display_name,
@@ -1899,6 +2085,30 @@ def run_ui():
                                     # Multivariante - usar diseño de tabla
                                     chi_square_result = calculate_chi_square_test(variants)
                                     
+                                    # Acumular para exportación CSV (sin funnel, multivariante: P2BB y % Improvement vs control)
+                                    baseline_multi = variants[0]
+                                    for i, v in enumerate(variants):
+                                        n, x = v.get("n", 0), v.get("x", 0)
+                                        tasa = round((x / n) * 100, 4) if n else 0
+                                        if i == 0:
+                                            p2bb_val = ""
+                                            improvement_val = ""
+                                            pval = round(chi_square_result["p_value"], 5) if chi_square_result and chi_square_result.get("p_value") is not None else ""
+                                        else:
+                                            comp = calculate_single_comparison(baseline_multi, v)
+                                            p2bb_val = round(comp.get("p2bb", 0) * 100, 2) if comp.get("p2bb") is not None else ""
+                                            improvement_val = round(comp.get("relative_lift", 0), 2) if comp.get("relative_lift") is not None else ""
+                                            pval = round(comp["p_value"], 5) if comp.get("p_value") is not None else ""
+                                        general_results_rows.append({
+                                            "Metrica": metric_display_name,
+                                            "Variante": v.get("name", ""),
+                                            "Sesiones": n,
+                                            "Conversiones": x,
+                                            "% Conversión": tasa,
+                                            "P2BB": p2bb_val,
+                                            "% Improvement": improvement_val,
+                                            "P-value": pval,
+                                        })
                                     # Mostrar tarjeta multivariante: Header = Experimento, Sub-header = Métrica
                                     create_multivariant_card(
                                         metric_name=metric_display_name,
@@ -1910,6 +2120,18 @@ def run_ui():
                                     
                             else:
                                 st.warning(f"⚠️ Se necesitan al menos 2 variantes para el análisis estadístico de '{metric_display_name}'")
+                    
+                    # Botón de descarga CSV - Resultados generales (siempre 8 columnas alineadas con la UI)
+                    if general_results_rows:
+                        df_export_general = _general_results_rows_to_export_df(general_results_rows)
+                        date_suffix = _date_range_suffix_for_filename()
+                        st.download_button(
+                            label="📥 Descargar Resultados Generales (CSV)",
+                            data=_dataframe_to_csv_bytes(df_export_general),
+                            file_name=f"resultados_generales_{experiment_id_stat}_{date_suffix}.csv",
+                            mime="text/csv",
+                            key=f"download_general_results_{experiment_id_stat}",
+                        )
                     
                     # ============================================
                     # LABORATORIO DE SEGMENTACIÓN V2
@@ -2096,6 +2318,8 @@ def run_ui():
                                     # Verificación de integridad antes del procesamiento
                                     # Solo procesar si hay segmentos disponibles
                                     if len(segments_to_process) > 0:
+                                        # Acumular filas para exportación CSV de segmentación
+                                        segmentation_export_rows = []
                                         # Procesar cada métrica con desglose
                                         for metric_info in original_metrics:
                                             metric_display_name = metric_info['name']
@@ -2475,73 +2699,57 @@ def run_ui():
                                                 # Los resultados ya vienen en el orden correcto de segment_values
                                                 pass
                                             
-                                            # Renderizar resultados según el modo seleccionado
-                                            if not show_cards:
-                                                # Modo Tabla (por defecto): Mostrar tablas resumen
-                                                # Modo Tabla: Acumular datos y mostrar DataFrame
-                                                data_rows = []
-                                                
-                                                for result in segment_results:
-                                                    try:
-                                                        variants = result['variants']
-                                                        segment_value = result['segment']
-                                                        
-                                                        if len(variants) < 1:
-                                                            continue
-                                                        
-                                                        # Baseline (control) es la primera variante
-                                                        baseline = variants[0]
-                                                        
-                                                        # Calcular CR del control
-                                                        cr_control = (baseline['x'] / baseline['n']) * 100 if baseline['n'] > 0 else 0
-                                                        
-                                                        # Iterar sobre todas las variantes (excluyendo el control, índice 0)
-                                                        if len(variants) > 1:
-                                                            # Bucle interno: una fila por cada variante comparada contra el control
-                                                            for i in range(1, len(variants)):
-                                                                variant = variants[i]
-                                                                variant_name = variant.get('name', f'Variant-{i}')
-                                                                comparison = calculate_single_comparison(baseline, variant)
-                                                                
-                                                                cr_variant = (variant['x'] / variant['n']) * 100 if variant['n'] > 0 else 0
-                                                                p_value = comparison['p_value']
-                                                                is_significant = comparison['significant']
-                                                                p2bb_value = comparison.get('p2bb', 0)
-                                                                # Formatear P2BB como porcentaje sin decimales
-                                                                p2bb_display = f"{round(p2bb_value * 100)}%" if p2bb_value is not None else "-"
-                                                                
-                                                                data_rows.append({
-                                                                    "Segmento": segment_value,
-                                                                    "Variante": variant_name,
-                                                                    "Sesiones (Ctrl)": baseline['n'],
-                                                                    "Sesiones (Var)": variant['n'],
-                                                                    "CR Control": cr_control,
-                                                                    "CR Variant": cr_variant,
-                                                                    "Lift (%)": comparison['relative_lift'],  # Ya está en porcentaje
-                                                                    "P2BB": p2bb_display,
-                                                                    "P-Value": p_value,
-                                                                    "Sig.": "✅" if is_significant else "-"
-                                                                })
-                                                        else:
-                                                            # Solo hay control, mostrar solo datos del control
+                                            # Construir data_rows para tabla y/o exportación CSV (siempre)
+                                            data_rows = []
+                                            for result in segment_results:
+                                                try:
+                                                    variants = result['variants']
+                                                    segment_value = result['segment']
+                                                    if len(variants) < 1:
+                                                        continue
+                                                    baseline = variants[0]
+                                                    cr_control = (baseline['x'] / baseline['n']) * 100 if baseline['n'] > 0 else 0
+                                                    if len(variants) > 1:
+                                                        for i in range(1, len(variants)):
+                                                            variant = variants[i]
+                                                            variant_name = variant.get('name', f'Variant-{i}')
+                                                            comparison = calculate_single_comparison(baseline, variant)
+                                                            cr_variant = (variant['x'] / variant['n']) * 100 if variant['n'] > 0 else 0
+                                                            p2bb_value = comparison.get('p2bb', 0)
+                                                            p2bb_display = f"{round(p2bb_value * 100)}%" if p2bb_value is not None else "-"
                                                             data_rows.append({
                                                                 "Segmento": segment_value,
-                                                                "Variante": "N/A",
+                                                                "Variante": variant_name,
                                                                 "Sesiones (Ctrl)": baseline['n'],
-                                                                "Sesiones (Var)": 0,
+                                                                "Sesiones (Var)": variant['n'],
                                                                 "CR Control": cr_control,
-                                                                "CR Variant": 0.0,
-                                                                "Lift (%)": 0.0,
-                                                                "P2BB": "-",  # Control no tiene P2BB
-                                                                "P-Value": 1.0,
-                                                                "Sig.": "-"
+                                                                "CR Variant": cr_variant,
+                                                                "Lift (%)": comparison['relative_lift'],
+                                                                "P2BB": p2bb_display,
+                                                                "P-Value": comparison['p_value'],
+                                                                "Sig.": "✅" if comparison['significant'] else "-"
                                                             })
-                                                        
-                                                    except Exception as e:
-                                                        # Manejar errores silenciosamente
-                                                        continue
-                                                
-                                                # Renderizar tabla resumen si hay datos
+                                                    else:
+                                                        data_rows.append({
+                                                            "Segmento": segment_value,
+                                                            "Variante": "N/A",
+                                                            "Sesiones (Ctrl)": baseline['n'],
+                                                            "Sesiones (Var)": 0,
+                                                            "CR Control": cr_control,
+                                                            "CR Variant": 0.0,
+                                                            "Lift (%)": 0.0,
+                                                            "P2BB": "-",
+                                                            "P-Value": 1.0,
+                                                            "Sig.": "-"
+                                                        })
+                                                except Exception:
+                                                    continue
+                                            # Acumular para exportación CSV de segmentación (no romper si data_rows vacío)
+                                            for row in data_rows:
+                                                segmentation_export_rows.append({**row, "Métrica": metric_display_name})
+                                            # Renderizar resultados según el modo seleccionado
+                                            if not show_cards:
+                                                # Modo Tabla: mostrar tabla resumen
                                                 if len(data_rows) > 0:
                                                     # Verificación de integridad: asegurar que hay datos suficientes
                                                     expected_min_rows = len(segments_to_process)  # Mínimo una fila por segmento
@@ -2582,8 +2790,25 @@ def run_ui():
                                                 else:
                                                     # Si no hay segmentos seleccionados, mostrar mensaje
                                                     st.info("ℹ️ Por favor, selecciona al menos un segmento para visualizar en detalle.")
+                                        
+                                        # Botón de descarga CSV - Segmentación (DataFrame presentación = vista usuario, 10 columnas exactas)
+                                        COLUMNAS_CSV_SEGMENTACION = [
+                                            "Métrica", "Segmento", "Variante", "Sesiones (Ctrl)", "Sesiones (Var)",
+                                            "CR Control", "CR Variant", "Lift (%)", "P2BB", "P-Value", "Sig."
+                                        ]
+                                        if segmentation_export_rows:
+                                            dimension_slug = breakdown_selected.replace(" ", "_")
+                                            df_seg = pd.DataFrame(segmentation_export_rows)
+                                            df_export_seg = df_seg[[c for c in COLUMNAS_CSV_SEGMENTACION if c in df_seg.columns]]
+                                            date_suffix = _date_range_suffix_for_filename()
+                                            st.download_button(
+                                                label="📥 Descargar Segmentación (CSV)",
+                                                data=_dataframe_to_csv_bytes(df_export_seg),
+                                                file_name=f"segmentacion_{dimension_slug}_{experiment_id_stat}_{date_suffix}.csv",
+                                                mime="text/csv",
+                                                key=f"download_segmentation_{dimension_slug}_{experiment_id_stat}",
+                                            )
                                     
-                                    # Cerrar el bucle de métricas
                                     else:
                                         # Si no hay segmentos disponibles, mostrar warning
                                         st.warning(f"⚠️ No hay segmentos disponibles para procesar en '{breakdown_selected}'. Por favor, verifica los parámetros del análisis.")
